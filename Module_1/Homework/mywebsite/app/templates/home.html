@@ -2,14 +2,15 @@
 {% block title %}Home — Personal Site{% endblock %}
 {% block content %}
 <div class="row align-items-center g-4">
-  <div class="col-md-6">
-    <h1 class="mb-1">Shraddha Shree</h1>
-    <p class="text-muted mb-3">Student - MS in AI, JHU</p>
-    <p>
-     I’m Shraddha Shree. I work in software engineering/architecture and I’m taking prerequisites towards MS in AI at JHU. This project is my first Flask site: a small, three-page layout using Bootstrap and a clean navbar. I value clarity, simple structure, and code that’s easy to maintain.
-    </p>
-  </div>
-  <div class="col-md-6 text-md-end">
+  <div class="col-md-6 order-2 order-md-1">
+        <h1 class="mb-1">Shraddha Shree</h1>
+        <p class="text-muted mb-3">Student - MS in AI, JHU</p>
+        <p>
+         I’m Shraddha Shree. I work in software engineering/architecture and I’m taking prerequisites towards MS in AI at JHU. This project is my first Flask site: a small, three-page layout using Bootstrap and a clean navbar. I value clarity, simple structure, and code that’s easy to maintain.
+        </p>
+    </div>
+
+  <div class="col-md-6 order-1 order-md-2 d-flex justify-content-md-end">
     <img src="{{ url_for('static', filename='images/profile.jpg') }}"
          alt="Profile photo"
          class="img-fluid rounded shadow-sm profile-pic">
