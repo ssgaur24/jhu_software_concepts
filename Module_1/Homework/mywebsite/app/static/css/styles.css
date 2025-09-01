@@ -1,0 +1,17 @@
+/* Keep it simple and readable, per lecture guidance on CSS basics */
+body { background: #f9fbfd; }
+
+.navbar-custom {
+  background: #eef3f9; /* colorized and distinct from the page */
+  border-bottom: 1px solid #dde6f1;
+}
+
+.nav-link.active {
+  font-weight: 600;
+  border-bottom: 2px solid #0d6efd; /* highlight current tab */
+}
+
+.profile-pic {
+  max-height: 260px; /* keeps image tidy on first pass */
+  object-fit: cover;
+}

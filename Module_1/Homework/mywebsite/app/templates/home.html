@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Home — Personal Site{% endblock %}
+{% block content %}
+<div class="row align-items-center g-4">
+  <div class="col-md-6">
+    <h1 class="mb-1">Your Name</h1>
+    <p class="text-muted mb-3">Your Position / Role</p>
+    <p>
+      Short bio -- Need to fill
+    </p>
+  </div>
+  <div class="col-md-6 text-md-end">
+    <img src="{{ url_for('static', filename='images/profile.jpg') }}"
+         alt="Profile photo"
+         class="img-fluid rounded shadow-sm profile-pic">
+  </div>
+</div>
+{% endblock %}
