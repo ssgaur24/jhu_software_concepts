@@ -15,3 +15,6 @@ body { background: #f9fbfd; }
   max-height: 260px; /* keeps image tidy on first pass */
   object-fit: cover;
 }
+
+.card { border-radius: 0.75rem; }
+.card-title { font-weight: 600; }

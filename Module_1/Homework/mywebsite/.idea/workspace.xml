@@ -5,9 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="431a3bc0-a7e8-48e2-ba26-fa350211d73c" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/app/templates/base.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/templates/contact.html" beforeDir="false" afterPath="$PROJECT_DIR$/app/templates/contact.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/templates/projects.html" beforeDir="false" afterPath="$PROJECT_DIR$/app/templates/projects.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -85,7 +83,7 @@
       <option name="presentableId" value="Default" />
       <updated>1756502770071</updated>
       <workItem from="1756502771112" duration="974000" />
-      <workItem from="1756687036215" duration="4032000" />
+      <workItem from="1756687036215" duration="4407000" />
     </task>
     <servers />
   </component>
@@ -93,6 +91,6 @@
     <option name="version" value="3" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/mywebsite$Flask.coverage" NAME="My website run.py (8080) Coverage Results" MODIFIED="1756692752735" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Masters\JHU\Fall2025\Python\jhu_software_concepts\Module_1\Homework\mywebsite" />
+    <SUITE FILE_PATH="coverage/mywebsite$Flask.coverage" NAME="My website run.py (8080) Coverage Results" MODIFIED="1756693055857" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Masters\JHU\Fall2025\Python\jhu_software_concepts\Module_1\Homework\mywebsite" />
   </component>
 </project>
