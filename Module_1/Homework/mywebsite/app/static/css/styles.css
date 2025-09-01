@@ -1,15 +1,24 @@
-/* Keep it simple and readable, per lecture guidance on CSS basics */
+/* Page background */
 body { background: #f9fbfd; }
 
+/* Colorized navbar (distinct from body) */
 .navbar-custom {
-  background: #eef3f9; /* colorized and distinct from the page */
-  border-bottom: 1px solid #dde6f1;
+  background: #e8f0ff;          /*  different from body */
+  border-bottom: 1px solid #cfe0ff;
 }
 
-.nav-link.active {
-  font-weight: 600;
-  border-bottom: 2px solid #0d6efd; /* highlight current tab */
+
+.navbar-custom .nav-link {
+  margin-left: 1rem;            /* Added spacing between nav items */
+  color: #0b2e66;               /* to make readable on the light blue bar */
 }
+.navbar-custom .nav-link.active {
+  font-weight: 600;
+  border-bottom: 2px solid #0d6efd;
+}
+
+
+.navbar-custom .navbar-brand { color: #0b2e66; }
 
 .profile-pic {
   max-height: 260px; /* keeps image tidy on first pass */
