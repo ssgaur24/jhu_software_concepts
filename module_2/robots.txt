@@ -1,0 +1,27 @@
+User-agent: *
+Disallow: /cgi-bin/
+Disallow: /index-ad-test.php
+
+User-agent: ia_archiver
+Disallow: /
+
+User-agent: ia_archiver/1.6
+Disallow: /
+
+User-Agent: sitecheck.internetseer.com
+Disallow: /
+
+User-agent: Computer_and_Automation_Research_Institute_Crawler
+Disallow: /
+
+User-agent: dotbot
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Mediapartners-Google
+Disallow:
+
+User-agent: Opebot-v (https://www.1plusx.com (https://www.1plusx.com/)) 
+Allow: /
