@@ -28,5 +28,14 @@
 
 # \- <None observed>.
 
-
+How to run:
+1) python module_2/scrape.py
+2) python module_2/clean.py
+3) python module_2/size_check.py
+LLM cleaning:
+- (cd module_2/llm_hosting && pip install -r requirements.txt)
+- python module_2/llm_hosting/app.py --file "module_2/applicant_data.json" > "module_2/llm_extend_applicant_data.json"
+Robots:
+- Checked robots.txt (screenshot in module_2/robots_screenshot.jpg)
+EOF
 

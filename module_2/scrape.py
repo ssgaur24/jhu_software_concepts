@@ -1,6 +1,8 @@
 # step 1 — minimal scraper: single page, extract only admission status via generic regex
 
 # paginate until >= 40,000 unique entries (urllib3 + simple de-dup)
+# update —  resume + save per page, changes to run it faster
+# speed tweaks — gzip, faster writes, resume, tiny delay
 
 import re
 import json
@@ -12,9 +14,9 @@ import urllib3
 from bs4 import BeautifulSoup
 
 URL = "https://www.thegradcafe.com/survey/"
-TARGET = 40000  # requested size
+TARGET = 30000  # aiming for 30k now to finish
 
-# patterns (kept)
+# precompiled patterns
 status_pat = re.compile(r"\b(accept\w*|reject\w*|wait[\s-]*list\w*|interview\w*)\b", re.IGNORECASE)
 date_pat = re.compile(
     r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
@@ -26,6 +28,12 @@ start_term_pat = re.compile(r"\b(Fall|Spring|Summer|Winter)\s+\d{4}\b", re.IGNOR
 university_pat = re.compile(
     r"\b([A-Z][A-Za-z.&'\- ]{2,}(?:University|College|Institute|Polytechnic|Tech|State University))\b"
 )
+
+# request headers + short timeouts (faster)
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Encoding": "gzip, deflate",
+}
 
 def _norm_status(s: str) -> str:
     # normalize status token
@@ -41,8 +49,14 @@ def _norm_status(s: str) -> str:
     return s.title()
 
 def _http_get(http, url: str) -> str:
-    # open page
-    r = http.request("GET", url, headers={"User-Agent": "Mozilla/5.0"})
+    # open page (short timeouts; gzip)
+    r = http.request(
+        "GET",
+        url,
+        headers=HEADERS,
+        timeout=urllib3.Timeout(connect=3.0, read=10.0),
+        preload_content=True,
+    )
     return r.data.decode("utf-8", errors="ignore")
 
 def _robots_allowed(http, base_url: str, path: str) -> bool:
@@ -55,11 +69,12 @@ def _robots_allowed(http, base_url: str, path: str) -> bool:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if line.lower().startswith("user-agent:"):
+        low = line.lower()
+        if low.startswith("user-agent:"):
             agent = line.split(":", 1)[1].strip()
             in_star = (agent == "*")
             continue
-        if in_star and line.lower().startswith("disallow:"):
+        if in_star and low.startswith("disallow:"):
             rule = line.split(":", 1)[1].strip()
             disallows.append(rule)
     for rule in disallows:
@@ -68,7 +83,7 @@ def _robots_allowed(http, base_url: str, path: str) -> bool:
     return True
 
 def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
-    # parse one page and return new rows
+    # parse one page and return only new rows
     soup = BeautifulSoup(html, "html.parser")
     new_rows = []
 
@@ -77,6 +92,7 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
         if not status_pat.search(row_text):
             continue
 
+        # small context: this row + previous row (for term/labels if present)
         prev = tr.find_previous("tr")
         prev_text = prev.get_text(" ", strip=True) if prev else ""
         ctx = f"{prev_text} {row_text}".strip()
@@ -88,7 +104,12 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
         # dates
         acceptance_date = ""
         rejection_date = ""
-        m_date = date_pat.search(ctx)
+        # try date from this row's cells first (often in the 3rd td)
+        tds = tr.find_all("td")
+        row_date_text = ""
+        if len(tds) >= 3:
+            row_date_text = tds[2].get_text(" ", strip=True)
+        m_date = date_pat.search(row_date_text) or date_pat.search(ctx)
         if m_date:
             if status == "Accepted":
                 acceptance_date = m_date.group(0)
@@ -112,21 +133,19 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
         if entry_url in seen_urls:
             continue
 
-        # program + degree from tags
-        program_name = ""
+        # program and degree separately (no concatenation)
+        program = ""
         degree = ""
-        tds = tr.find_all("td")
         if len(tds) >= 2:
             mid = tds[1]
             spans = mid.select("div span")
             if spans:
-                program_name = spans[0].get_text(strip=True)
+                program = spans[0].get_text(strip=True)
                 deg_span = mid.select_one("span.tw-text-gray-500")
                 if deg_span:
                     degree = deg_span.get_text(strip=True)
                 elif len(spans) >= 2:
                     degree = spans[-1].get_text(strip=True)
-        program = (program_name).strip()
 
         # university
         university = ""
@@ -137,9 +156,9 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
             m_uni = university_pat.search(ctx)
             university = m_uni.group(1) if m_uni else ""
 
-        # comments
+        # comments (quick heuristic)
         comments = ""
-        q = re.search(r'"([^"]]{3,})"', ctx)
+        q = re.search(r'"([^"]{3,})"', ctx)
         if q:
             comments = q.group(1)
         else:
@@ -165,43 +184,61 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
 def main():
     http = urllib3.PoolManager()
 
-    # robots check
+    # robots check once
     parsed = urlparse(URL)
     base = f"{parsed.scheme}://{parsed.netloc}"
     path = parsed.path or "/"
     if not _robots_allowed(http, base, path):
         print("robots: not allowed for this path — exiting")
         return
-    print("robots: allowed")
 
+    out_path = Path(__file__).parent / "applicant_data.json"
+
+    # resume from existing file
     rows = []
     seen = set()
+    if out_path.exists():
+        try:
+            rows = json.loads(out_path.read_text(encoding="utf-8"))
+            for r in rows:
+                u = r.get("entry_url", "")
+                if u:
+                    seen.add(u)
+            print(f"resume: {len(rows)} records")
+        except Exception:
+            rows = []
+            seen = set()
 
-    # page 1 (no query)
-    html = _http_get(http, URL)
-    rows += _extract_rows_from_html(html, URL, seen)
+    # first page
+    if len(rows) < TARGET:
+        html = _http_get(http, URL)
+        page_rows = _extract_rows_from_html(html, URL, seen)
+        if page_rows:
+            rows.extend(page_rows)
+            # fast write (no pretty printing)
+            out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            print(f"page 1 +{len(page_rows)} total {len(rows)}")
 
-    # paginate ?page=2,3,...
+    # paginate; tiny delay; save after each page (compact json for speed)
     page = 2
     while len(rows) < TARGET:
         page_url = f"{URL}?page={page}"
         html = _http_get(http, page_url)
         before = len(rows)
-        rows += _extract_rows_from_html(html, page_url, seen)
+        page_rows = _extract_rows_from_html(html, page_url, seen)
+        rows.extend(page_rows)
         added = len(rows) - before
+
+        out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(f"page {page} +{added} total {len(rows)}")
+
         if added == 0:
             break
         page += 1
-        time.sleep(0.5)  # delay between fetch
+        time.sleep(0.05)  # keep a very small pause
 
-    # save json next to this script
-    out_path = Path(__file__).parent / "applicant_data.json"
-    out_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
-
-    # tiny summary
+    # final line
     print(f"saved: {out_path} ({len(rows)} records)")
-    for rec in rows[:3]:
-        print({k: rec[k] for k in ["status", "program", "university", "entry_url"]})
 
 if __name__ == "__main__":
     main()
