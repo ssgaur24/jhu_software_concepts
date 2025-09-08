@@ -126,7 +126,7 @@ def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
                     degree = deg_span.get_text(strip=True)
                 elif len(spans) >= 2:
                     degree = spans[-1].get_text(strip=True)
-        program = (program_name + (" " + degree if degree else "")).strip()
+        program = (program_name).strip()
 
         # university
         university = ""
