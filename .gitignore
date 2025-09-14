@@ -1,15 +1,35 @@
+# llama.cpp downloads (large, reproducible)
+module_2/llm_hosting/models/
+
+
+module_3/config.local.ini
+
+
+# ---- Environments / caches / OS cruft ----
 # venvs
 .venv/
 **/.venv/
 .env
 
-# Python cache
 __pycache__/
 *.pyc
-
-# OS cruft
 .DS_Store
 
-# llama.cpp downloads (large, reproducible)
-module_2/llm_hosting/models/
-module_3/config.local.ini
+# ---- IDE / project files ----
+.idea/
+*.iml
+module_3/.idea/
+**/.idea
+**/.iml
+
+# ---- Logs / local databases ----
+*.log
+*.db
+*.sqlite
+
+# ---- Module 3 artifacts ----
+module_3/*.tar.gz
+
+# ---- Large model files ----
+*.gguf
+Practice/module_2/models/
