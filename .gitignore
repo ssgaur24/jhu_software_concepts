@@ -12,3 +12,4 @@ __pycache__/
 
 # llama.cpp downloads (large, reproducible)
 module_2/llm_hosting/models/
+module_3/config.local.ini
