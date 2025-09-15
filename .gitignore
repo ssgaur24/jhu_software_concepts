@@ -29,6 +29,8 @@ module_3/.idea/
 
 # ---- Module 3 artifacts ----
 module_3/*.tar.gz
+module_3/artifacts/
+
 
 # ---- Large model files ----
 *.gguf
