@@ -1,48 +1,74 @@
-"""DDL for the applicants table and verification helpers.
+"""DDL for the applicants table and verification helpers (Module 3).
 
-Creates the canonical applicants table and provides a small row-count check.
-If the table exists with degree as TEXT (from earlier attempts), it is migrated
-to REAL safely: non-numeric degree values become NULL during the cast.
+- Creates/ensures public.applicants exists with instructor-corrected column types.
+- Performs an in-place migration if an older table has degree as REAL: converts to TEXT.
 """
 
-# local import for DB access
-from src.dal.pool import get_conn
+from __future__ import annotations
 
-# explicit schema qualification avoids GUI visibility issues
+from typing import Optional
+from src.dal.pool import get_conn  # pooled connections
+
+
+# canonical DDL
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS public.applicants (
-    p_id INTEGER PRIMARY KEY,
-    program TEXT,
-    comments TEXT,
-    date_added DATE,
-    url TEXT,
-    status TEXT,
-    term TEXT,
-    us_or_international TEXT,
-    gpa REAL,
-    gre REAL,
-    gre_v REAL,
-    gre_aw REAL,
-    degree REAL,
-    llm_generated_program TEXT,
-    llm_generated_university TEXT
+  p_id INTEGER PRIMARY KEY,
+  program TEXT,
+  comments TEXT,
+  date_added DATE,
+  url TEXT,
+  status TEXT,
+  term TEXT,
+  us_or_international TEXT,
+  gpa REAL,
+  gre REAL,
+  gre_v REAL,
+  gre_aw REAL,
+  degree TEXT,
+  llm_generated_program TEXT,
+  llm_generated_university TEXT
 );
 """
 
 
-def init_schema() -> None:
-    """Create the applicants table in public schema (idempotent)."""
-    # open a pooled connection and create table if missing
+def _current_degree_type() -> Optional[str]:
+    """Return the current data_type of public.applicants.degree, or None if missing."""
+    sql = """
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'applicants' AND column_name = 'degree'
+        LIMIT 1
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(SCHEMA_SQL)  # run DDL once
-        conn.commit()  # persist the DDL
+            cur.execute(sql)
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def init_schema() -> None:
+    """Create applicants table if missing, then migrate degree to TEXT if needed (idempotent)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # create if not exists (degree TEXT)
+            cur.execute(SCHEMA_SQL)
+            # migrate degree column to TEXT if previously REAL/NUMERIC
+            cur.execute("""
+                SELECT data_type
+                  FROM information_schema.columns
+                 WHERE table_schema='public' AND table_name='applicants' AND column_name='degree'
+            """)
+            row = cur.fetchone()
+            if row and row[0].lower() != "text":
+                # safe cast existing numeric->text
+                cur.execute("ALTER TABLE public.applicants ALTER COLUMN degree TYPE TEXT USING degree::text;")
+        conn.commit()
 
 
 def count_rows() -> int:
     """Return the number of rows in public.applicants."""
-    # run a tiny aggregate to verify table visibility and contents
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM public.applicants;")  # small check
-            return cur.fetchone()[0]  # return integer count
+            cur.execute("SELECT COUNT(*) FROM public.applicants;")
+            return int(cur.fetchone()[0])

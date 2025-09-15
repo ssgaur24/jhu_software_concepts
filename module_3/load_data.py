@@ -1,55 +1,66 @@
-"""Module-3 entry-point script to initialize schema and load JSON.
+"""Module-3 loader entry point.
 
-Usage:
-    python module_3/load_data.py --init \
-      --load module_3/data/module_2llm_extend_applicant_data.json \
-      --batch 2000 --count
+Usage (canonical):
+  python module_3/load_data.py --init \
+    --load module_3/data/module_2llm_extend_applicant_data.json \
+    --batch 2000 --count
+
+- --init: create/verify schema (degree TEXT migration included)
+- --load: load JSON array into public.applicants in batches
+- --count: print final row count
 """
 
-# stdlib imports
-import argparse
+from __future__ import annotations
 
-# local imports
-from src.dal.schema import init_schema, count_rows
-from src.dal.loader import load_json, first_ids
+import argparse
+import sys
+from pathlib import Path
+
 from src.dal.pool import close_pool
+from src.dal.schema import init_schema
+from src.dal.loader import load_json, first_ids
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse CLI args (student helper)."""
+    p = argparse.ArgumentParser(description="Module-3 data loader")
+    p.add_argument("--init", action="store_true", help="create/verify schema")
+    p.add_argument("--load", type=str, help="path to JSON array from Module-2 (LLM)")
+    p.add_argument("--batch", type=int, default=2000, help="insert batch size (default: 2000)")
+    p.add_argument("--count", action="store_true", help="print final row count")
+    return p.parse_args()
 
 
 def main() -> None:
-    """Parse CLI flags and run init/load/count as requested."""
-    # set up CLI flags as per assignment
-    p = argparse.ArgumentParser(description="Load Module-2 cleaned applicants into PostgreSQL")
-    p.add_argument("--init", action="store_true", help="create applicants table if not exists")
-    p.add_argument("--load", metavar="PATH", help="path to cleaned applicants JSON (Module-2)")
-    p.add_argument("--batch", type=int, default=2000, help="batch size for inserts (default: 2000)")
-    p.add_argument("--count", action="store_true", help="print total rows in applicants")
-    args = p.parse_args()
+    """Run requested steps: init, load, count."""
+    args = parse_args()
 
-    try:
-        # optionally create schema first
-        if args.init:
-            init_schema()
+    if args.init:
+        init_schema()
+        print("schema: ensured (degree TEXT)")
 
-        # optionally load data in fast batches
-        if args.load:
-            total, inserted, skipped, issue_counts, report_path = load_json(args.load, batch=args.batch)
-            # tiny, fast summary print
-            print(
-                f"loaded_records={total} inserted={inserted} skipped={skipped} "
-                f"issues={issue_counts} sample_ids={first_ids(3)}"
-            )
-            # path to detailed audit file (kept small and readable)
-            print(f"report={report_path}")
+    if args.load:
+        json_path = Path(args.load)
+        if not json_path.exists():
+            raise SystemExit(f"input not found: {json_path}")
 
-        # optionally print a tiny final count
-        if args.count:
-            print(f"rows={count_rows()}")
+        total, inserted, skipped, issue_counts, report_path = load_json(str(json_path), batch=args.batch)
+        samples = first_ids(str(json_path), 3)  # <-- fixed: pass path then k
+        print(
+            f"loaded_records={total} inserted={inserted} skipped={skipped}\n"
+            f"issues={issue_counts} sample_ids={samples}\n"
+            f"report={report_path}"
+        )
 
-    finally:
-        # cleanly stop pool threads on exit
-        close_pool()
+    if args.count:
+        # tiny count via SELECT COUNT(*) kept in query_data or schema utils
+        from src.dal.schema import count_rows
+        print(f"row_count={count_rows()}")
 
 
 if __name__ == "__main__":
-    # standard python entrypoint
-    main()
+    try:
+        main()
+    finally:
+        # always close the pool at exit (student cleanup)
+        close_pool()

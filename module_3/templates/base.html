@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{% block title %}Module 3{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { font-size: 20px; margin-bottom: 12px; }
+      .note { color: #666; font-size: 12px; margin: 8px 0 16px 0; }
+      .course { border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+      .foot { margin-top: 12px; color: #666; font-size: 12px; }
+      .warn { color: #b36b00; }
+      code { background: #f7f7f7; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    {% block content %}{% endblock %}
+    <div class="foot">
+      {% if report_exists %}
+        <span class="warn">Note:</span> Data caveats summarized in <code>module_3/artifacts/load_report.json</code>.
+      {% endif %}
+    </div>
+  </body>
+</html>

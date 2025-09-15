@@ -1,24 +1,26 @@
 """Run Module-3 SQL queries against public.applicants.
 
-Answers assignment Q1–Q8 and two custom questions with tiny console output.
-- Outputs are printed and also saved to module_3/artifacts/queries_output.txt
-- Uses the connection pool from src.dal.pool
+Answers assignment Q1–Q8 and two custom questions.
+Implements instructor notes:
+- Use llm_generated_university and llm_generated_program for university/program logic.
+- Apply reasonability filters: GPA <= 5, GRE <= 400.
+
+Tiny outputs + artifacts text file.
 """
 
 from __future__ import annotations
 
-# stdlib
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import datetime as dt
 
-# local
 from src.dal.pool import get_conn, close_pool
 
 
 # -- helpers ---------------------------------------------------------------
 
-def _fetch_val(sql: str, params: Optional[Iterable[Any]] = None) -> Any:
-    """Execute a scalar SQL and return the first column of the first row."""
+def _fetch_val(sql: str, params: Optional[Iterable[Any]] = None) -> Optional[Any]:
+    """Execute a query and return the first column of the first row (or None)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
@@ -35,7 +37,7 @@ def _fetch_all(sql: str, params: Optional[Iterable[Any]] = None) -> List[Tuple]:
 
 
 def _write_lines(lines: List[str]) -> Path:
-    """Write lines to artifacts/queries_output.txt and return the path."""
+    """Write lines to artifacts/queries_output.txt and return the path (student helper)."""
     base = Path(__file__).resolve().parent
     outdir = base / "artifacts"
     outdir.mkdir(parents=True, exist_ok=True)
@@ -44,23 +46,22 @@ def _write_lines(lines: List[str]) -> Path:
     return path
 
 
-# -- Q1–Q8 (from assignment) ----------------------------------------------
-# Q1. How many entries applied for Fall 2025?  (term filter)
-# (Assignment list of questions: see PDF.)  # Q refs: Q1–Q8
+# -- Q1–Q8 (assignment) ----------------------------------------------------
+
 def q1_count_fall_2025() -> int:
-    # count rows where term indicates Fall 2025
+    """Count rows with term indicating Fall 2025."""
     sql = """
         SELECT COUNT(*) FROM public.applicants
         WHERE term ILIKE 'fall%%2025%%'
            OR term ILIKE 'fall 2025'
            OR term ILIKE '2025 fall'
+           OR term ILIKE '%%2025%%fall%%'
     """
     return int(_fetch_val(sql) or 0)
 
 
-# Q2. Percentage of entries that are International (not American or Other) — two decimals
 def q2_pct_international() -> float:
-    # compute share where us_or_international indicates international
+    """Percent of rows with us_or_international = 'international' (case-insensitive)."""
     sql = """
         SELECT CASE WHEN COUNT(*) = 0 THEN 0
             ELSE 100.0 * SUM(CASE WHEN LOWER(us_or_international) = 'international' THEN 1 ELSE 0 END)::float
@@ -71,21 +72,24 @@ def q2_pct_international() -> float:
     return float(_fetch_val(sql) or 0.0)
 
 
-# Q3. Average GPA, GRE, GRE V, GRE AW of applicants who provide these metrics
 def q3_avgs() -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Averages of GPA, GRE, GRE_V, GRE_AW with reasonability filters (may return NULLs)."""
     sql = """
-        SELECT AVG(gpa), AVG(gre), AVG(gre_v), AVG(gre_aw)
+        SELECT AVG(CASE WHEN gpa <= 5 THEN gpa END),
+               AVG(CASE WHEN gre <= 400 THEN gre END),
+               AVG(gre_v),        -- instructor only specified caps for GPA/GRE total
+               AVG(gre_aw)
         FROM public.applicants
         WHERE gpa IS NOT NULL OR gre IS NOT NULL OR gre_v IS NOT NULL OR gre_aw IS NOT NULL
     """
     row = _fetch_all(sql)[0]
-    return tuple(row)  # may include None if no data
+    return tuple(row)  # type: ignore[return-value]
 
 
-# Q4. Average GPA of American students in Fall 2025
 def q4_avg_gpa_american_fall2025() -> Optional[float]:
+    """Average GPA of American students for Fall 2025 (GPA <= 5 only)."""
     sql = """
-        SELECT AVG(gpa)
+        SELECT AVG(CASE WHEN gpa <= 5 THEN gpa END)
         FROM public.applicants
         WHERE gpa IS NOT NULL
           AND LOWER(us_or_international) = 'american'
@@ -94,99 +98,75 @@ def q4_avg_gpa_american_fall2025() -> Optional[float]:
     return _fetch_val(sql)
 
 
-# Q5. Percent of entries for Fall 2025 that are Acceptances (two decimals)
 def q5_pct_accept_fall2025() -> float:
+    """Percent accepted among Fall 2025 entries (case-insensitive status prefix 'accept')."""
     sql = """
         SELECT CASE WHEN COUNT(*) = 0 THEN 0
-            ELSE 100.0 * SUM(CASE WHEN LOWER(status) LIKE 'accepted%%' THEN 1 ELSE 0 END)::float
+            ELSE 100.0 * SUM(CASE WHEN LOWER(status) LIKE 'accept%%' THEN 1 ELSE 0 END)::float
                  / COUNT(*)
         END
         FROM public.applicants
-        WHERE term ILIKE 'fall%%2025%%'
-           OR term ILIKE 'fall 2025'
-           OR term ILIKE '2025 fall'
+        WHERE (term ILIKE 'fall%%2025%%' OR term ILIKE 'fall 2025' OR term ILIKE '2025 fall')
     """
     return float(_fetch_val(sql) or 0.0)
 
 
-# Q6. Average GPA of applicants who applied for Fall 2025 who are Acceptances
 def q6_avg_gpa_accept_fall2025() -> Optional[float]:
+    """Average GPA (<=5) of accepted entries for Fall 2025."""
     sql = """
-        SELECT AVG(gpa)
+        SELECT AVG(CASE WHEN gpa <= 5 THEN gpa END)
         FROM public.applicants
         WHERE gpa IS NOT NULL
-          AND LOWER(status) LIKE 'accepted%%'
+          AND LOWER(status) LIKE 'accept%%'
           AND (term ILIKE 'fall%%2025%%' OR term ILIKE 'fall 2025' OR term ILIKE '2025 fall')
     """
     return _fetch_val(sql)
 
 
-# Q7. How many entries are from applicants who applied to JHU for a masters degree in CS?
-#    Note: DB 'degree' is REAL per assignment; source often contains text (e.g., "PhD") -> NULL in DB.
-#    Heuristic: treat "masters" if degree between 0.5 and 1.5 OR program mentions MS/Master.
 def q7_count_jhu_masters_cs() -> int:
+    """Count entries applying to JHU for a master's in Computer Science using LLM fields."""
     sql = """
         SELECT COUNT(*)
         FROM public.applicants
         WHERE
-          (
-            program ILIKE '%%johns hopkins%%'
-            OR program ILIKE '%%hopkins%%'
-            OR program ILIKE '%%jhu%%'
-          )
-          AND (
-            program ILIKE '%%computer science%%'
-            OR program ILIKE '%%cs%%'
-          )
-          AND (
-            (degree IS NOT NULL AND degree BETWEEN 0.5 AND 1.5)
-            OR program ILIKE '%%ms%%'
-            OR program ILIKE '%%master%%'
-          )
+          (llm_generated_university ILIKE '%%johns hopkins%%' OR llm_generated_university ILIKE '%%jhu%%')
+          AND (llm_generated_program ILIKE '%%computer%%science%%' OR llm_generated_program ILIKE '%%cs%%')
+          AND (llm_generated_program ILIKE '%%master%%' OR llm_generated_program ILIKE '%%ms%%')
     """
     return int(_fetch_val(sql) or 0)
 
 
-# Q8. How many entries from 2025 are **acceptances** for Georgetown **PhD** in CS?
-#     Interpret "from 2025" as entries with date_added in year 2025.
-#     Heuristic for PhD: degree >= 1.5 OR program mentions PhD/Doctor.
 def q8_count_2025_georgetown_phd_cs_accept() -> int:
+    """Count 2025 acceptances for Georgetown PhD in CS using LLM fields (date_added year or term contains 2025)."""
     sql = """
         SELECT COUNT(*)
         FROM public.applicants
         WHERE
-          date_part('year', date_added) = 2025
-          AND LOWER(status) LIKE 'accepted%%'
-          AND (
-            program ILIKE '%%georgetown%%'
-          )
-          AND (
-            program ILIKE '%%computer science%%' OR program ILIKE '%%cs%%'
-          )
-          AND (
-            (degree IS NOT NULL AND degree >= 1.5)
-            OR program ILIKE '%%phd%%'
-            OR program ILIKE '%%doctor%%'
-          )
+          ( (date_added IS NOT NULL AND date_part('year', date_added) = 2025)
+            OR (term ILIKE '%%2025%%') )
+          AND LOWER(status) LIKE 'accept%%'
+          AND (llm_generated_university ILIKE '%%georgetown%%')
+          AND (llm_generated_program ILIKE '%%computer%%science%%' OR llm_generated_program ILIKE '%%cs%%')
+          AND (llm_generated_program ILIKE '%%phd%%' OR llm_generated_program ILIKE '%%doctor%%')
     """
     return int(_fetch_val(sql) or 0)
 
 
-# -- Two additional custom questions --------------------------------------
+# -- Q9/Q10 (custom) -------------------------------------------------------
 
-# Q9 (custom). Top 5 universities by number of ACCEPTANCES in 2025 (by date_added year)
-# Extract "university" as the string before ' - ' in program when present.
 def q9_top5_accept_unis_2025() -> List[Tuple[str, int]]:
+    """Top 5 universities by acceptances in 2025 using LLM university (fallback to parsed program)."""
     sql = """
         SELECT
-          CASE WHEN position(' - ' in program) > 0
-               THEN split_part(program, ' - ', 1)
-               ELSE program
-          END AS university,
+          COALESCE(NULLIF(TRIM(llm_generated_university), ''),
+                   CASE WHEN position(' - ' in program) > 0
+                        THEN split_part(program, ' - ', 1)
+                        ELSE program END) AS university,
           COUNT(*) AS accept_count
         FROM public.applicants
-        WHERE date_part('year', date_added) = 2025
-          AND LOWER(status) LIKE 'accepted%%'
+        WHERE ((date_added IS NOT NULL AND date_part('year', date_added) = 2025)
+               OR (term ILIKE '%%2025%%'))
+          AND LOWER(status) LIKE 'accept%%'
         GROUP BY university
         ORDER BY accept_count DESC, university ASC
         LIMIT 5
@@ -194,65 +174,93 @@ def q9_top5_accept_unis_2025() -> List[Tuple[str, int]]:
     return _fetch_all(sql)
 
 
-# Q10 (custom). Average GRE Quant for Accepted vs Rejected in 2025 (quick comparison)
-def q10_avg_gre_by_status_2025() -> List[Tuple[str, Optional[float]]]:
+def q10_avg_gre_by_status_year(year: int) -> List[Tuple[str, Optional[float]]]:
+    """Average GRE by status for a given calendar year with GRE <= 400 filter."""
     sql = """
-        SELECT
-          CASE
-            WHEN LOWER(status) LIKE 'accepted%%' THEN 'Accepted'
-            WHEN LOWER(status) LIKE 'rejected%%' THEN 'Rejected'
-            ELSE 'Other'
-          END AS status_group,
-          AVG(gre) AS avg_gre
+        SELECT status,
+               AVG(CASE WHEN gre <= 400 THEN gre END) AS avg_gre
         FROM public.applicants
-        WHERE date_part('year', date_added) = 2025
+        WHERE date_added IS NOT NULL
+          AND date_part('year', date_added) = %s
           AND gre IS NOT NULL
-        GROUP BY status_group
-        ORDER BY status_group
+        GROUP BY status
+        ORDER BY status
     """
-    return _fetch_all(sql)
+    return _fetch_all(sql, (year,))
 
 
-# -- main runner -----------------------------------------------------------
+def q10_avg_gre_by_status_last_n_years(n_years: int) -> List[Tuple[str, Optional[float]]]:
+    """Average GRE by status for the last n calendar years from today (GRE <= 400)."""
+    today = dt.date.today()
+    start_year = today.year - (n_years - 1)
+    sql = """
+        SELECT status,
+               AVG(CASE WHEN gre <= 400 THEN gre END) AS avg_gre
+        FROM public.applicants
+        WHERE date_added IS NOT NULL
+          AND date_part('year', date_added) BETWEEN %s AND %s
+          AND gre IS NOT NULL
+        GROUP BY status
+        ORDER BY status
+    """
+    return _fetch_all(sql, (start_year, today.year))
+
+
+# -- driver ---------------------------------------------------------------
 
 def run_all() -> List[str]:
-    """Execute all questions and return formatted output lines."""
+    """Compute all lines for artifacts output (student tiny run)."""
     lines: List[str] = []
-    # Q1–Q8 (assignment)   # refs: assignment Q list
+
+    # Q1–Q8
     lines.append(f"Q1  Fall 2025 entries: {q1_count_fall_2025()}")
     lines.append(f"Q2  % International: {q2_pct_international():.2f}%")
+
     gpa, gre, gre_v, gre_aw = q3_avgs()
-    lines.append(
-        "Q3  Averages (GPA, GRE, GRE_V, GRE_AW): "
-        f"{'%.2f' % gpa if gpa is not None else 'NA'}, "
-        f"{'%.2f' % gre if gre is not None else 'NA'}, "
-        f"{'%.2f' % gre_v if gre_v is not None else 'NA'}, "
-        f"{'%.2f' % gre_aw if gre_aw is not None else 'NA'}"
-    )
-    lines.append(f"Q4  Avg GPA (American, Fall 2025): {q4_avg_gpa_american_fall2025() if q4_avg_gpa_american_fall2025() is not None else 'NA'}")
+    def _fmt_opt(x: Optional[float]) -> str:
+        return f"{x:.2f}" if x is not None else "NA"
+    if all(v is None for v in (gpa, gre, gre_v, gre_aw)):
+        lines.append("Q3  Averages (GPA, GRE, GRE_V, GRE_AW): NA")
+    else:
+        present = []
+        if gpa is not None: present.append(f"Average GPA: {gpa:.2f}")
+        if gre is not None: present.append(f"Average GRE: {gre:.2f}")
+        if gre_v is not None: present.append(f"Average GRE V: {gre_v:.2f}")
+        if gre_aw is not None: present.append(f"Average GRE AW: {gre_aw:.2f}")
+        lines.append("Q3  " + ", ".join(present))
+
+    q4 = q4_avg_gpa_american_fall2025()
+    lines.append(f"Q4  Avg GPA (American, Fall 2025): {q4:.2f}" if q4 is not None else "Q4  Avg GPA (American, Fall 2025): NA")
     lines.append(f"Q5  % Acceptances (Fall 2025): {q5_pct_accept_fall2025():.2f}%")
-    lines.append(f"Q6  Avg GPA (Accepted, Fall 2025): {q6_avg_gpa_accept_fall2025() if q6_avg_gpa_accept_fall2025() is not None else 'NA'}")
+    q6 = q6_avg_gpa_accept_fall2025()
+    lines.append(f"Q6  Avg GPA (Accepted, Fall 2025): {q6:.2f}" if q6 is not None else "Q6  Avg GPA (Accepted, Fall 2025): NA")
     lines.append(f"Q7  JHU Masters CS entries: {q7_count_jhu_masters_cs()}")
     lines.append(f"Q8  2025 Accepted Georgetown PhD CS entries: {q8_count_2025_georgetown_phd_cs_accept()}")
 
-    # custom
+    # Q9/Q10
     top5 = q9_top5_accept_unis_2025()
-    lines.append("Q9  Top 5 Accepting Universities in 2025 (university, count): " +
+    lines.append("Q9  Top 5 Accepting Universities in 2025: " +
                  (", ".join([f"{u}={c}" for (u, c) in top5]) if top5 else "NA"))
 
-    gre_by_status = q10_avg_gre_by_status_2025()
-    lines.append("Q10 Avg GRE by Status (2025): " +
-                 (", ".join([f"{s}={'%.2f' % v if v is not None else 'NA'}" for (s, v) in gre_by_status]) if gre_by_status else "NA"))
+    def _fmt_status(rows: List[Tuple[str, Optional[float]]]) -> str:
+        non_null = [(s, v) for (s, v) in rows if v is not None]
+        return ", ".join([f"{s}={v:.2f}" for (s, v) in non_null]) if non_null else "NA"
+
+    q10_2024 = q10_avg_gre_by_status_year(2024)
+    lines.append("Q10a Avg GRE by Status (2024): " + _fmt_status(q10_2024))
+
+    q10_last3 = q10_avg_gre_by_status_last_n_years(3)
+    lines.append("Q10b Avg GRE by Status (last 3 yrs): " + _fmt_status(q10_last3))
 
     return lines
 
 
 if __name__ == "__main__":
     try:
-        out_lines = run_all()                 # run queries
-        for ln in out_lines:                  # tiny console output
+        out_lines = run_all()
+        for ln in out_lines:
             print(ln)
-        out_path = _write_lines(out_lines)    # write artifacts/queries_output.txt
+        out_path = _write_lines(out_lines)
         print(f"saved={out_path}")
     finally:
-        close_pool()                          # cleanly stop pool threads
+        close_pool()

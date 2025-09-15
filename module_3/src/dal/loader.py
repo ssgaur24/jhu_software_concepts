@@ -1,241 +1,216 @@
-"""Fast JSON loader with assignment-aligned key mapping and robust type handling.
+"""Fast JSON loader for Module 3 with assignment-aligned mapping.
 
-- Batches inserts (default 2000) in a single transaction for speed on ~30k rows.
-- Converts numeric fields to float; if conversion fails, stores NULL and records an issue.
-- Parses multiple date formats; unparsable dates become NULL and are recorded.
-- Records a concise audit report at module_3/artifacts/load_report.json:
-  - total_records, inserted_rows, skipped_without_id
-  - issue_counts per field (e.g., degree_non_numeric, date_parse_fail)
-  - sample p_id lists (first few) for each issue
+- Skips records without a stable id (p_id parsed from entry_url '/result/<id>' or 'p_id' key).
+- Batches inserts in a single transaction (default batch=2000) for speed on ~30k rows.
+- Numeric coercion: gpa/gre/gre_v/gre_aw -> float if possible; else NULL.
+- Date parsing: multiple formats; unparsable -> NULL.
+- Accepts LLM fields from instructor tools with either underscore or hyphen keys:
+  * llm_generated_program  | llm-generated-program
+  * llm_generated_university| llm-generated-university
+- Writes a concise audit report to module_3/artifacts/load_report.json.
 """
 
-# stdlib imports
+from __future__ import annotations
+
 import json
 import re
 import datetime as dt
-from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# local imports
-from src.dal.pool import get_conn
+from src.dal.pool import get_conn  # pooled access
 
-# explicit schema qualification for stable GUI visibility
+
 INSERT_SQL = """
 INSERT INTO public.applicants (
-    p_id, program, comments, date_added, url, status, term, us_or_international,
-    gpa, gre, gre_v, gre_aw, degree, llm_generated_program, llm_generated_university
-)
-VALUES (
-    %(p_id)s, %(program)s, %(comments)s, %(date_added)s, %(url)s, %(status)s, %(term)s, %(us_or_international)s,
-    %(gpa)s, %(gre)s, %(gre_v)s, %(gre_aw)s, %(degree)s, %(llm_generated_program)s, %(llm_generated_university)s
-)
-ON CONFLICT (p_id) DO NOTHING;
+  p_id, program, comments, date_added, url, status, term, us_or_international,
+  gpa, gre, gre_v, gre_aw, degree, llm_generated_program, llm_generated_university
+) VALUES (
+  %(p_id)s, %(program)s, %(comments)s, %(date_added)s, %(url)s, %(status)s, %(term)s, %(us_or_international)s,
+  %(gpa)s, %(gre)s, %(gre_v)s, %(gre_aw)s, %(degree)s, %(llm_generated_program)s, %(llm_generated_university)s
+) ON CONFLICT (p_id) DO NOTHING;
 """
 
-# precompiled helpers for id/date parsing
 _ID_FROM_URL = re.compile(r"/result/(\d+)")
 _DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d", "%B %d, %Y")
 
 
 def _to_float(x: Any) -> Optional[float]:
-    """Convert numeric-like values to float or None."""
-    # accept None/empty as NULL; attempt float conversion otherwise
+    """Convert numeric-like values to float or None (student helper)."""
     if x is None:
         return None
+    if isinstance(x, (int, float)):
+        return float(x)
     s = str(x).strip()
-    if s == "":
+    if not s:
         return None
     try:
         return float(s)
     except ValueError:
-        return None  # record via issue tracker at mapping callsite
-
-
-def _parse_date(s: Optional[str]) -> Optional[dt.date]:
-    """Parse common date formats; return None on failure."""
-    # iterate known formats until one parses
-    if not s:
         return None
-    s = str(s).strip()
+
+
+def _to_date(x: Any) -> Optional[dt.date]:
+    """Parse multiple date formats into date or None."""
+    if not x:
+        return None
+    s = str(x).strip()
     for fmt in _DATE_FORMATS:
         try:
             return dt.datetime.strptime(s, fmt).date()
-        except ValueError:
+        except Exception:
             continue
-    return None  # recorded by mapping when raw values existed
+    # also support abbreviated months like "Mar 01, 2025"
+    try:
+        return dt.datetime.strptime(s, "%b %d, %Y").date()
+    except Exception:
+        return None
 
 
-def _derive_p_id(entry_url: Optional[str], fallback: Optional[Any]) -> Optional[int]:
-    """Prefer extracting numeric id from entry_url; else try an integer fallback."""
-    # extract "/result/<id>" from entry_url when present
-    if entry_url:
-        m = _ID_FROM_URL.search(entry_url)
-        if m:
-            try:
-                return int(m.group(1))
-            except ValueError:
-                pass
-    # if no URL id, attempt to coerce provided p_id
-    if fallback is not None:
+def _stable_id(rec: Dict[str, Any]) -> Optional[int]:
+    """Extract stable numeric id from entry_url or p_id field."""
+    if "p_id" in rec and isinstance(rec["p_id"], (int, float)) and int(rec["p_id"]) > 0:
+        return int(rec["p_id"])
+    url = rec.get("entry_url") or rec.get("url") or ""
+    m = _ID_FROM_URL.search(str(url))
+    return int(m.group(1)) if m else None
+
+
+def _compose_program(university: str, program: str) -> str:
+    """Compose 'University - Program' when both exist to aid grouping (student helper)."""
+    u = (university or "").strip()
+    p = (program or "").strip()
+    if u and p:
+        return f"{u} - {p}"
+    return p or u
+
+
+def _map_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a raw JSON row into DB insert dict."""
+    p_id = _stable_id(rec)
+    if p_id is None:
+        raise ValueError("missing_stable_id")
+
+    university = rec.get("university", "")
+    program_only = rec.get("program", "")
+
+    # Support multiple casings/keys coming from different stages
+    llm_prog = (
+        rec.get("llm_generated_program")
+        or rec.get("llm-generated-program")
+        or rec.get("standardized_program")
+    )
+    llm_uni = (
+        rec.get("llm_generated_university")
+        or rec.get("llm-generated-university")
+        or rec.get("standardized_university")
+    )
+
+    degree_val = rec.get("degree")
+    if degree_val in (None, ""):
+        degree_val = rec.get("Degree")  # tolerate title-cased 'Degree' from some scrapers
+        if degree_val == "":
+            degree_val = None
+
+    mapped = {
+        "p_id": p_id,
+        "program": _compose_program(str(university), str(program_only)),
+        "comments": (rec.get("comments") or "").strip() or None,
+        "date_added": _to_date(rec.get("date_added") or rec.get("acceptance_date") or rec.get("rejection_date")),
+        "url": rec.get("entry_url") or rec.get("url") or None,
+        "status": rec.get("status") or None,
+        "term": rec.get("start_term") or rec.get("term") or None,
+        "us_or_international": rec.get("US/International") or rec.get("us_or_international") or None,
+        "gpa": _to_float(rec.get("GPA") or rec.get("gpa")),
+        "gre": _to_float(rec.get("GRE") or rec.get("gre")),
+        "gre_v": _to_float(rec.get("GRE V") or rec.get("gre_v")),
+        "gre_aw": _to_float(rec.get("GRE AW") or rec.get("gre_aw")),
+        "degree": (str(degree_val).strip() if degree_val not in (None, "") else None),  # TEXT
+        "llm_generated_program": (str(llm_prog).strip() if llm_prog else None),
+        "llm_generated_university": (str(llm_uni).strip() if llm_uni else None),
+    }
+    return mapped
+
+
+def _chunks(lst: List[Dict[str, Any]], n: int):
+    """Yield size-n chunks (student helper)."""
+    for i in range(0, len(lst), n):
+        yield lst[i : i + n]
+
+
+def first_ids(path: str, k: int = 3) -> List[int]:
+    """Return first k stable ids present in the JSON array (student helper)."""
+    arr = json.loads(Path(path).read_text(encoding="utf-8"))
+    ids: List[int] = []
+    for rec in arr:
         try:
-            return int(fallback)
-        except (TypeError, ValueError):
-            return None
-    return None  # caller will count as missing_p_id
+            sid = _stable_id(rec)
+            if sid is not None:
+                ids.append(sid)
+                if len(ids) >= k:
+                    break
+        except Exception:
+            continue
+    return ids
 
 
-def _init_issue_tracker() -> Dict[str, Any]:
-    """Initialize counters and sample holders for load issues."""
-    # track counts plus small sample p_id lists per category
-    return {
+def load_json(path: str, batch: int = 2000):
+    """Load a JSON array file into public.applicants, return summary tuple.
+
+    Returns: (total_records, inserted_rows, skipped_without_id, issue_counts, report_path)
+    """
+    p = Path(path)
+    arr = json.loads(p.read_text(encoding="utf-8"))
+    total = len(arr)
+
+    to_insert: List[Dict[str, Any]] = []
+    skipped = 0
+    issue_counts = {
         "missing_p_id": 0,
         "date_parse_fail": 0,
         "gpa_non_numeric": 0,
         "gre_non_numeric": 0,
         "gre_v_non_numeric": 0,
         "gre_aw_non_numeric": 0,
-        "degree_non_numeric": 0,
-        "_samples": {
-            "missing_p_id": [],
-            "date_parse_fail": [],
-            "gpa_non_numeric": [],
-            "gre_non_numeric": [],
-            "gre_v_non_numeric": [],
-            "gre_aw_non_numeric": [],
-            "degree_non_numeric": [],
-        },
     }
 
+    # map & validate
+    for rec in arr:
+        try:
+            mapped = _map_record(rec)
+            # audit for date parse fail
+            if (rec.get("date_added") or rec.get("acceptance_date") or rec.get("rejection_date")) and mapped["date_added"] is None:
+                issue_counts["date_parse_fail"] += 1
+            # audit numeric parsing
+            if rec.get("GPA") not in (None, "") and mapped["gpa"] is None:
+                issue_counts["gpa_non_numeric"] += 1
+            if rec.get("GRE") not in (None, "") and mapped["gre"] is None:
+                issue_counts["gre_non_numeric"] += 1
+            if rec.get("GRE V") not in (None, "") and mapped["gre_v"] is None:
+                issue_counts["gre_v_non_numeric"] += 1
+            if rec.get("GRE AW") not in (None, "") and mapped["gre_aw"] is None:
+                issue_counts["gre_aw_non_numeric"] += 1
 
-def _write_report(total: int, inserted: int, skipped: int, issues: Dict[str, Any], batch: int) -> Path:
-    """Write a concise JSON report and return its path."""
-    # create artifacts dir and emit a compact, human-readable summary
-    base = Path(__file__).resolve().parents[2]  # .../module_3
-    outdir = base / "artifacts"
-    outdir.mkdir(parents=True, exist_ok=True)  # ensure folder exists
-    path = outdir / "load_report.json"
+            to_insert.append(mapped)
+        except ValueError:
+            issue_counts["missing_p_id"] += 1
+            skipped += 1
+
+    # batch insert
+    inserted_total = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for chunk in _chunks(to_insert, batch):
+                cur.executemany(INSERT_SQL, chunk)
+                inserted_total += cur.rowcount if cur.rowcount is not None else 0
+        conn.commit()
+
+    # write concise report
+    art_dir = Path(__file__).resolve().parent.parent / "artifacts"
+    art_dir.mkdir(parents=True, exist_ok=True)
+    report_path = art_dir / "load_report.json"
+    sample_ids = first_ids(path, k=3)
     report = {
-        "summary": {
-            "total_records": total,
-            "inserted_rows": inserted,
-            "skipped_without_id": skipped,
-            "batch_size": batch,
-        },
-        "issue_counts": {k: v for k, v in issues.items() if k != "_samples"},
-        "issue_samples": issues["_samples"],  # small p_id lists only
-    }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)  # pretty JSON for graders
-    return path  # allow caller to print the path
-
-
-def _map_record(rec: Dict[str, Any], issues: Dict[str, Any], sample_limit: int = 20) -> Optional[Dict[str, Any]]:
-    """Map one JSON object to the DB row dict; return None if no stable p_id."""
-    # normalize keys (spaces/hyphens/slashes -> underscores; lowercase)
-    norm: Dict[str, Any] = {}
-    for k, v in rec.items():
-        nk = k.strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_")  # normalize key
-        norm[nk] = v
-
-    # derive p_id from URL or provided key
-    entry_url = norm.get("entry_url") or norm.get("url") or ""
-    p_id = _derive_p_id(entry_url, norm.get("p_id"))
-    if p_id is None:
-        issues["missing_p_id"] += 1  # count missing id
-        if len(issues["_samples"]["missing_p_id"]) < sample_limit:
-            issues["_samples"]["missing_p_id"].append(entry_url or str(norm.get("p_id")))  # keep small sample
-        return None  # skip row entirely (PK required)
-
-    # build "program" text (University - Program) when both exist
-    program_raw = (norm.get("program") or "").strip()
-    university_raw = (norm.get("university") or "").strip()
-    program = f"{university_raw} - {program_raw}".strip(" -") if university_raw else program_raw  # final program text
-
-    # choose a date (acceptance > rejection > date_added) and track failures
-    date_added = None
-    for d in (norm.get("acceptance_date"), norm.get("rejection_date"), norm.get("date_added")):
-        date_added = _parse_date(d)
-        if date_added:
-            break
-    if date_added is None and any((norm.get("acceptance_date"), norm.get("rejection_date"), norm.get("date_added"))):
-        issues["date_parse_fail"] += 1  # count date parse failures
-        if len(issues["_samples"]["date_parse_fail"]) < sample_limit:
-            issues["_samples"]["date_parse_fail"].append(p_id)  # keep sample p_id
-
-    # helper to coerce numeric fields and record issues when non-numeric text is present
-    def _num(field_key_in_norm: str, issue_key: str) -> Optional[float]:
-        val = norm.get(field_key_in_norm)  # raw value from JSON
-        out = _to_float(val)  # try to coerce to float
-        if out is None and (val not in (None, "")):
-            issues[issue_key] += 1  # count non-numeric anomalies
-            if len(issues["_samples"][issue_key]) < sample_limit:
-                issues["_samples"][issue_key].append(p_id)  # keep sample p_id
-        return out  # return float or None for NULL
-
-    # assemble final row dict for executemany()
-    return {
-        "p_id": p_id,
-        "program": program,
-        "comments": norm.get("comments") or "",
-        "date_added": date_added,
-        "url": entry_url,
-        "status": norm.get("status") or "",
-        "term": norm.get("start_term") or norm.get("term") or "",
-        "us_or_international": norm.get("us_international") or norm.get("us_or_international") or "",
-        "gpa": _num("gpa", "gpa_non_numeric"),
-        "gre": _num("gre", "gre_non_numeric"),
-        "gre_v": _num("gre_v", "gre_v_non_numeric"),
-        "gre_aw": _num("gre_aw", "gre_aw_non_numeric"),
-        "degree": _num("degree", "degree_non_numeric"),  # keep REAL per assignment; non-numeric → NULL
-        "llm_generated_program": norm.get("llm_generated_program") or "",
-        "llm_generated_university": norm.get("llm_generated_university") or "",
-    }
-
-
-def load_json(path: str, batch: int = 2000) -> Tuple[int, int, int, Dict[str, int], Path]:
-    """Load a JSON array from `path` and insert rows in batches.
-
-    Returns:
-        total_records, inserted_rows, skipped_without_id, issue_counts, report_path
-    """
-    # read JSON file (expects an array of objects)
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError("Expected a JSON array of applicant records")  # enforce shape
-
-    # map/validate rows and track issues
-    issues = _init_issue_tracker()  # initialize counters
-    mapped: List[Dict[str, Any]] = []  # output rows
-    skipped = 0  # number of rows skipped due to missing id
-    for r in data:
-        row = _map_record(r or {}, issues)  # map and validate
-        if row is None:
-            skipped += 1  # count skipped row
-            continue
-        mapped.append(row)  # keep valid row
-
-    # insert in batches inside a single transaction for speed
-    inserted = 0  # count of rows accepted by the DB
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            for i in range(0, len(mapped), batch):
-                chunk = mapped[i : i + batch]  # compute batch slice
-                cur.executemany(INSERT_SQL, chunk)  # bulk insert this batch
-                if cur.rowcount and cur.rowcount > 0:
-                    inserted += cur.rowcount  # accumulate accepted rows
-        conn.commit()  # persist transaction
-
-    # write concise audit report for graders and diagnostics
-    report_path = _write_report(len(data), inserted, skipped, issues, batch)  # output report
-    issue_counts = {k: v for k, v in issues.items() if k != "_samples"}  # strip samples for CLI print
-    return len(data), inserted, skipped, issue_counts, report_path  # return summary tuple
-
-
-def first_ids(n: int = 3) -> List[int]:
-    """Return the first n p_id values for a tiny preview."""
-    # simple query to preview first few primary keys
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT p_id FROM public.applicants ORDER BY p_id ASC LIMIT %s;", (n,))  # small select
-            return [r[0] for r in cur.fetchall()]  # unpack list of ints
+        "total_records": total,
+        "inserted": inserted_total,
+        "skipped_without_id": skippe

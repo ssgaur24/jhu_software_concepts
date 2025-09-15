@@ -46,6 +46,11 @@ python module_3/load_data.py --init \
   --batch 2000 --count
 ~~~
 
+## Part B: Run UI
+~~~bash
+python app.py
+~~~
+
 ## Verify database and table visibility
 ~~~bash
 python module_3/db_check.py
@@ -89,3 +94,11 @@ loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, '
 - Config precedence → `DATABASE_URL` overrides `config.ini` if present.
 - JSON loading speed (≈30k rows) → batched inserts in a single transaction.
 - Data formatting quirks → numeric coercion with NULL fallback, robust date parsing, skip rows without id.
+
+## Part B — Webpage Buttons (Pull Data & Update Analysis)
+
+- **Pull Data**: Fetches only *new* entries from GradCafe (incremental), cleans/deduplicates them, runs the instructor’s LLM standardizer to populate `llm-generated-university` / `llm-generated-program`, and **loads the updated JSON into Postgres**. A small lock (`module_3/artifacts/pull.lock`) prevents overlapping pulls.
+- **Update Analysis**: Recomputes all on-page answers using the current database. If a pull is running, this button is disabled and does nothing (the page shows a notice).
+- Dependencies for the scraper (`urllib3`, `beautifulsoup4`) are installed automatically the first time **Pull Data** runs, based on `module_3/module_2_ref/requirements.txt`.
+- **Note:** Numbers (and even which questions have data) may vary by dataset and run; the page reflects the latest rows successfully loaded.
+
