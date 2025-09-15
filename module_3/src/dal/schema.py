@@ -5,11 +5,12 @@ If the table exists with degree as TEXT (from earlier attempts), it is migrated
 to REAL safely: non-numeric degree values become NULL during the cast.
 """
 
+# local import for DB access
 from src.dal.pool import get_conn
 
-# canonical schema (categorical fields TEXT; numeric scores REAL; one DATE)
+# explicit schema qualification avoids GUI visibility issues
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS applicants (
+CREATE TABLE IF NOT EXISTS public.applicants (
     p_id INTEGER PRIMARY KEY,
     program TEXT,
     comments TEXT,
@@ -28,32 +29,20 @@ CREATE TABLE IF NOT EXISTS applicants (
 );
 """
 
+
 def init_schema() -> None:
-    """Create the applicants table and ensure `degree` is REAL (idempotent)."""
+    """Create the applicants table in public schema (idempotent)."""
+    # open a pooled connection and create table if missing
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Create table if missing
-            cur.execute(SCHEMA_SQL)
+            cur.execute(SCHEMA_SQL)  # run DDL once
+        conn.commit()  # persist the DDL
 
-            # Minimal migration: if degree is not REAL, coerce to REAL.
-            # Non-numeric existing values are turned into NULL safely.
-            cur.execute("""
-                SELECT data_type
-                FROM information_schema.columns
-                WHERE table_name = 'applicants' AND column_name = 'degree'
-            """)
-            row = cur.fetchone()
-            if row and row[0].lower() != "real":
-                cur.execute("""
-                    ALTER TABLE applicants
-                    ALTER COLUMN degree TYPE REAL
-                    USING NULLIF(regexp_replace(degree::text, '[^0-9\\.-]+', '', 'g'), '')::real
-                """)
-        conn.commit()
 
 def count_rows() -> int:
-    """Return the number of rows in applicants."""
+    """Return the number of rows in public.applicants."""
+    # run a tiny aggregate to verify table visibility and contents
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM applicants;")
-            return cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM public.applicants;")  # small check
+            return cur.fetchone()[0]  # return integer count

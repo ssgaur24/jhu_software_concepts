@@ -6,13 +6,18 @@ Usage:
       --batch 2000 --count
 """
 
+# stdlib imports
 import argparse
+
+# local imports
 from src.dal.schema import init_schema, count_rows
 from src.dal.loader import load_json, first_ids
 from src.dal.pool import close_pool
 
+
 def main() -> None:
     """Parse CLI flags and run init/load/count as requested."""
+    # set up CLI flags as per assignment
     p = argparse.ArgumentParser(description="Load Module-2 cleaned applicants into PostgreSQL")
     p.add_argument("--init", action="store_true", help="create applicants table if not exists")
     p.add_argument("--load", metavar="PATH", help="path to cleaned applicants JSON (Module-2)")
@@ -21,24 +26,30 @@ def main() -> None:
     args = p.parse_args()
 
     try:
+        # optionally create schema first
         if args.init:
             init_schema()
 
+        # optionally load data in fast batches
         if args.load:
             total, inserted, skipped, issue_counts, report_path = load_json(args.load, batch=args.batch)
-            # tiny, fast summary
+            # tiny, fast summary print
             print(
                 f"loaded_records={total} inserted={inserted} skipped={skipped} "
                 f"issues={issue_counts} sample_ids={first_ids(3)}"
             )
+            # path to detailed audit file (kept small and readable)
             print(f"report={report_path}")
 
+        # optionally print a tiny final count
         if args.count:
             print(f"rows={count_rows()}")
 
     finally:
-        # ensure pool threads stop when script ends
+        # cleanly stop pool threads on exit
         close_pool()
 
+
 if __name__ == "__main__":
+    # standard python entrypoint
     main()

@@ -87,5 +87,5 @@ loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, '
 - Pool worker threads not stopping → explicit `close_pool()` and `atexit`.
 - File path mistakes → track `module_3/data/` and use real paths.
 - Config precedence → `DATABASE_URL` overrides `config.ini` if present.
-- JSON loading speed (approx 30k rows) → batched inserts in a single transaction.
+- JSON loading speed (≈30k rows) → batched inserts in a single transaction.
 - Data formatting quirks → numeric coercion with NULL fallback, robust date parsing, skip rows without id.
