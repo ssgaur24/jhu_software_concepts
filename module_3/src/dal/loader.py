@@ -1,12 +1,13 @@
 """Fast JSON loader for Module 3 with assignment-aligned mapping.
 
-- Skips records without a stable id (p_id parsed from entry_url '/result/<id>' or 'p_id' key).
-- Batches inserts in a single transaction (default batch=2000) for speed on ~30k rows.
+- Skips records without a stable id (p_id parsed from entry_url '/result/<id>' or 'p_id').
+- Batches inserts in a single transaction (default batch=2000).
 - Numeric coercion: gpa/gre/gre_v/gre_aw -> float if possible; else NULL.
 - Date parsing: multiple formats; unparsable -> NULL.
-- Accepts LLM fields from instructor tools with either underscore or hyphen keys:
-  * llm_generated_program  | llm-generated-program
-  * llm_generated_university| llm-generated-university
+- Degree is stored as TEXT (per instructor correction).
+- Accepts LLM fields with underscore OR hyphen keys:
+    llm_generated_program  | llm-generated-program
+    llm_generated_university| llm-generated-university
 - Writes a concise audit report to module_3/artifacts/load_report.json.
 """
 
@@ -94,7 +95,7 @@ def _map_record(rec: Dict[str, Any]) -> Dict[str, Any]:
     university = rec.get("university", "")
     program_only = rec.get("program", "")
 
-    # Support multiple casings/keys coming from different stages
+    # Support multiple key spellings
     llm_prog = (
         rec.get("llm_generated_program")
         or rec.get("llm-generated-program")
@@ -108,7 +109,7 @@ def _map_record(rec: Dict[str, Any]) -> Dict[str, Any]:
 
     degree_val = rec.get("degree")
     if degree_val in (None, ""):
-        degree_val = rec.get("Degree")  # tolerate title-cased 'Degree' from some scrapers
+        degree_val = rec.get("Degree")  # tolerate title-cased key from some scrapers
         if degree_val == "":
             degree_val = None
 
@@ -165,7 +166,7 @@ def load_json(path: str, batch: int = 2000):
 
     to_insert: List[Dict[str, Any]] = []
     skipped = 0
-    issue_counts = {
+    issue_counts: Dict[str, int] = {
         "missing_p_id": 0,
         "date_parse_fail": 0,
         "gpa_non_numeric": 0,
@@ -209,8 +210,13 @@ def load_json(path: str, batch: int = 2000):
     art_dir = Path(__file__).resolve().parent.parent / "artifacts"
     art_dir.mkdir(parents=True, exist_ok=True)
     report_path = art_dir / "load_report.json"
-    sample_ids = first_ids(path, k=3)
     report = {
         "total_records": total,
         "inserted": inserted_total,
-        "skipped_without_id": skippe
+        "skipped_without_id": skipped,
+        "issue_counts": issue_counts,
+        "sample_ids": first_ids(path, k=3),
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return total, inserted_total, skipped, issue_counts, report_path
