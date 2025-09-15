@@ -19,6 +19,7 @@ module_3/
       pool.py
       schema.py
       loader.py
+  module_2_ref
   data/
     module_2llm_extend_applicant_data.json
   screenshots/
@@ -34,6 +35,7 @@ python -m venv .venv
 . .venv/Scripts/Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r module_3/requirements.txt
+python -m pip install -r module_3/module_2_ref/requirements.txt
 ~~~
 
 ## Database config
