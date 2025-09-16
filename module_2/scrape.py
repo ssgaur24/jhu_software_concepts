@@ -3,242 +3,259 @@
 # paginate until >= 40,000 unique entries (urllib3 + simple de-dup)
 # update —  resume + save per page, changes to run it faster
 # speed tweaks — gzip, faster writes, resume, tiny delay
-
-import re
-import json
-import time
+import json, re, time
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
-
+from typing import Dict, List, Set, Tuple, Optional
 import urllib3
 from bs4 import BeautifulSoup
 
-URL = "https://www.thegradcafe.com/survey/"
-TARGET = 30000  # aiming for 30k now to finish
+BASE = "https://www.thegradcafe.com"
+LIST_URL = f"{BASE}/survey/"`
 
-# precompiled patterns
-status_pat = re.compile(r"\b(accept\w*|reject\w*|wait[\s-]*list\w*|interview\w*)\b", re.IGNORECASE)
-date_pat = re.compile(
-    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
-    r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?)\s+\d{1,2},\s*\d{4}\b"
-    r"|\b\d{4}-\d{2}-\d{2}\b",
-    re.IGNORECASE,
-)
-start_term_pat = re.compile(r"\b(Fall|Spring|Summer|Winter)\s+\d{4}\b", re.IGNORECASE)
-university_pat = re.compile(
-    r"\b([A-Z][A-Za-z.&'\- ]{2,}(?:University|College|Institute|Polytechnic|Tech|State University))\b"
-)
-
-# request headers + short timeouts (faster)
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Encoding": "gzip, deflate",
-}
-
-def _norm_status(s: str) -> str:
-    # normalize status token
-    s = s.lower()
-    if s.startswith("accept"):
-        return "Accepted"
-    if s.startswith("reject"):
-        return "Rejected"
-    if s.startswith("wait"):
-        return "Wait listed"
-    if s.startswith("interview"):
-        return "Interview"
-    return s.title()
-
-def _http_get(http, url: str) -> str:
-    # open page (short timeouts; gzip)
+# ---------------- HTTP ----------------
+def _http_get(http: urllib3.PoolManager, url: str) -> str:
+    # fetch html
     r = http.request(
         "GET",
         url,
-        headers=HEADERS,
-        timeout=urllib3.Timeout(connect=3.0, read=10.0),
-        preload_content=True,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=urllib3.Timeout(connect=5, read=20),
     )
     return r.data.decode("utf-8", errors="ignore")
 
-def _robots_allowed(http, base_url: str, path: str) -> bool:
-    # basic robots.txt check
-    robots_url = urljoin(base_url, "/robots.txt")
-    txt = _http_get(http, robots_url)
-    disallows = []
-    in_star = False
-    for line in txt.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        low = line.lower()
-        if low.startswith("user-agent:"):
-            agent = line.split(":", 1)[1].strip()
-            in_star = (agent == "*")
-            continue
-        if in_star and low.startswith("disallow:"):
-            rule = line.split(":", 1)[1].strip()
-            disallows.append(rule)
-    for rule in disallows:
-        if rule and path.startswith(rule):
-            return False
-    return True
+# ---------------- small date helpers ----------------
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
+}
 
-def _extract_rows_from_html(html: str, page_url: str, seen_urls: set):
-    # parse one page and return only new rows
+def _year_from_text(txt: str) -> Optional[int]:
+    # pick a 4-digit year if present
+    m = re.search(r"\b(20\d{2})\b", txt or "")
+    return int(m.group(1)) if m else None
+
+def _ymd_from_chip(day_mon_txt: str, fallback_year: Optional[int]) -> str:
+    # parse like "Accepted on 1 Sep" => combine with fallback year
+    m = re.search(r"on\s+(\d{1,2})\s+([A-Za-z]+)", day_mon_txt or "", flags=re.I)
+    if not m or not fallback_year:
+        return ""
+    day = int(m.group(1))
+    mon = _MONTHS.get(m.group(2).strip().lower())
+    if not mon:
+        return ""
+    return f"{fallback_year:04d}-{mon:02d}-{day:02d}"
+
+def _ymd_from_notification(notif_txt: str) -> str:
+    # parse "on 14/09/2025" or "on 14-09-2025"
+    m = re.search(r"on\s+(\d{1,2})[/-](\d{1,2})[/-](\d{4})", notif_txt or "", flags=re.I)
+    if not m:
+        return ""
+    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return f"{y:04d}-{mth:02d}-{d:02d}"
+
+# ---------------- list page parsing ----------------
+def _extract_rows_from_list(html: str, seen_urls: Set[str]) -> List[Dict[str, str]]:
+    # parse list page and collect base rows
     soup = BeautifulSoup(html, "html.parser")
-    new_rows = []
+    out: List[Dict[str, str]] = []
 
-    for tr in soup.select("tr"):
-        row_text = tr.get_text(" ", strip=True)
-        if not status_pat.search(row_text):
+    # each result link goes to /result/<id>
+    for a in soup.select('a[href^="/result/"]'):
+        href = a.get("href", "")
+        if not href.startswith("/result/"):
             continue
-
-        # small context: this row + previous row (for term/labels if present)
-        prev = tr.find_previous("tr")
-        prev_text = prev.get_text(" ", strip=True) if prev else ""
-        ctx = f"{prev_text} {row_text}".strip()
-
-        # status
-        m_status = status_pat.search(row_text)
-        status = _norm_status(m_status.group(1)) if m_status else ""
-
-        # dates
-        acceptance_date = ""
-        rejection_date = ""
-        # try date from this row's cells first (often in the 3rd td)
-        tds = tr.find_all("td")
-        row_date_text = ""
-        if len(tds) >= 3:
-            row_date_text = tds[2].get_text(" ", strip=True)
-        m_date = date_pat.search(row_date_text) or date_pat.search(ctx)
-        if m_date:
-            if status == "Accepted":
-                acceptance_date = m_date.group(0)
-            elif status == "Rejected":
-                rejection_date = m_date.group(0)
-
-        # start term
-        m_term = start_term_pat.search(ctx)
-        start_term = m_term.group(0) if m_term else ""
-
-        # entry url
-        entry_url = ""
-        a = tr.select_one('a[href^="/result/"]')
-        if not a and prev:
-            a = prev.select_one('a[href^="/result/"]')
-        if a and a.get("href"):
-            entry_url = urljoin(page_url, a["href"])
-        else:
-            entry_url = f"{page_url}#row"
-
-        if entry_url in seen_urls:
+        url = BASE + href
+        if url in seen_urls:
             continue
+        seen_urls.add(url)
 
-        # program and degree separately (no concatenation)
-        program = ""
-        degree = ""
-        if len(tds) >= 2:
-            mid = tds[1]
-            spans = mid.select("div span")
+        row: Dict[str, str] = {"url": url}
+
+        # program + degree
+        cell = a.find_parent("td") or a.find_parent("div")
+        prog_txt, deg_txt = "", ""
+        if cell:
+            spans = [s.get_text(strip=True) for s in cell.select("span")]
             if spans:
-                program = spans[0].get_text(strip=True)
-                deg_span = mid.select_one("span.tw-text-gray-500")
-                if deg_span:
-                    degree = deg_span.get_text(strip=True)
-                elif len(spans) >= 2:
-                    degree = spans[-1].get_text(strip=True)
+                prog_txt = spans[0]
+                if len(spans) > 1:
+                    deg_txt = spans[1]
 
-        # university
-        university = ""
-        uni_a = tr.find("a", string=university_pat)
-        if uni_a:
-            university = uni_a.get_text(strip=True)
-        if not university:
-            m_uni = university_pat.search(ctx)
-            university = m_uni.group(1) if m_uni else ""
+        # term like "Fall 2026" chip
+        term_txt = ""
+        if cell:
+            chip = cell.find(string=re.compile(r"^(Fall|Spring|Summer)\s+\d{4}$"))
+            if chip:
+                term_txt = chip.strip()
 
-        # comments (quick heuristic)
-        comments = ""
-        q = re.search(r'"([^"]{3,})"', ctx)
-        if q:
-            comments = q.group(1)
+        # status chip near the row (Accepted / Rejected / Interview / Wait listed)
+        tr = a.find_parent("tr")
+        status_txt = ""
+        if tr:
+            # look for text tokens
+            for token in ("Accepted", "Rejected", "Interview", "Wait listed"):
+                el = tr.find(string=re.compile(rf"\b{re.escape(token)}\b"))
+                if el:
+                    status_txt = token
+                    break
+
+        # date_added column text (e.g., "September 01, 2025")
+        date_added = ""
+        if tr:
+            tds = tr.find_all("td")
+            if len(tds) >= 3:
+                date_added = tds[2].get_text(" ", strip=True)
+
+        row["program"] = prog_txt.strip()
+        row["Degree"] = deg_txt.strip()
+        row["term"] = term_txt
+        row["status"] = status_txt
+        row["date_added"] = date_added
+        row["comments"] = ""
+        row["US/International"] = ""
+        row["university"] = ""  # filled from detail
+        row["acceptance_date"] = ""
+        row["rejection_date"] = ""
+        row["GRE"] = ""
+        row["GRE_V"] = ""
+        row["GRE_AW"] = ""
+        row["GPA"] = ""
+
+        out.append(row)
+
+    return out
+
+# ---------------- detail page parsing ----------------
+def _parse_detail(detail_html: str) -> Dict[str, str]:
+    # parse dt/dd blocks and special sections
+    soup = BeautifulSoup(detail_html, "html.parser")
+    mapping: Dict[str, str] = {}
+
+    # map dt -> dd
+    for blk in soup.select("div.tw-border-t"):
+        dt = blk.find("dt")
+        dd = blk.find("dd")
+        if dt and dd:
+            key = dt.get_text(strip=True)
+            val = dd.get_text(" ", strip=True)
+            mapping[key] = val
+
+    # notes block
+    notes = mapping.get("Notes", "")
+    notes = re.sub(r"<[^>]+>", "", notes or "").strip()
+
+    # gre block (three values are rendered as list items; mapping has zeros sometimes)
+    gre = mapping.get("GRE General:", "") or ""
+    gre_v = mapping.get("GRE Verbal:", "") or ""
+    gre_aw = mapping.get("Analytical Writing:", "") or ""
+
+    # institution/program/degree/country/decision/notification
+    uni = mapping.get("Institution", "") or ""
+    prog = mapping.get("Program", "") or ""
+    deg = mapping.get("Degree Type", "") or ""
+    country = mapping.get("Degree's Country of Origin", "") or ""
+    decision = mapping.get("Decision", "") or ""
+    notif = mapping.get("Notification", "") or ""
+
+    # normalize blank-as-empty-string
+    def nz(x: Optional[str]) -> str:
+        return (x or "").strip()
+
+    return {
+        "university": nz(uni),
+        "program": nz(prog),
+        "Degree": nz(deg),
+        "US/International": nz(country),
+        "status_detail": nz(decision),
+        "notification": nz(notif),
+        "comments": nz(notes),
+        "GRE": nz(gre),
+        "GRE_V": nz(gre_v),
+        "GRE_AW": nz(gre_aw),
+    }
+
+# ---------------- merge + correct dates ----------------
+def _apply_detail_and_fix_dates(row: Dict[str, str], det: Dict[str, str]) -> None:
+    # merge detail values if present
+    for k in ("university", "program", "Degree", "US/International", "comments", "GRE", "GRE_V", "GRE_AW"):
+        v = det.get(k, "")
+        if v:
+            row[k] = v
+
+    # choose final status
+    status = row.get("status") or det.get("status_detail") or ""
+    row["status"] = status
+
+    # decision dates: prefer Notification date; else derive from chip + year
+    notif = det.get("notification", "")
+    date_added = row.get("date_added", "")
+    fallback_year = _year_from_text(date_added) or _year_from_text(row.get("term", ""))
+
+    iso_from_notif = _ymd_from_notification(notif)
+
+    if status == "Accepted":
+        if iso_from_notif:
+            row["acceptance_date"] = iso_from_notif
         else:
-            dash = re.search(r"\s[-–—]\s(.{5,120})$", row_text)
-            if dash:
-                comments = dash.group(1)
+            # try chip text next to status on list row: sometimes included in status cell text
+            chip_text = row.get("status_chip_text", "")  # not set; kept for compatibility
+            # as we do not persist chip text, use date_added's year + common "Accepted on <d Mon>" pattern if present
+            if fallback_year:
+                # some list rows render like "Accepted on 1 Sep" inside nearby chip; we may not have stored it.
+                # If not available, leave as "" to avoid wrong mapping.
+                pass
+    elif status == "Rejected":
+        if iso_from_notif:
+            row["rejection_date"] = iso_from_notif
+        else:
+            if fallback_year:
+                pass
+    else:
+        # Interview/Wait listed -> leave both blank
+        pass
 
-        new_rows.append({
-            "status": status,
-            "acceptance_date": acceptance_date,
-            "rejection_date": rejection_date,
-            "start_term": start_term,
-            "degree": degree,
-            "program": program,
-            "university": university,
-            "comments": comments,
-            "entry_url": entry_url,
-        })
-        seen_urls.add(entry_url)
-
-    return new_rows
-
-def main():
+# ---------------- main scrape ----------------
+def scrape_data(target: int = 30000) -> List[Dict[str, str]]:
     http = urllib3.PoolManager()
+    seen: Set[str] = set()
+    rows: List[Dict[str, str]] = []
+    page = 1
 
-    # robots check once
-    parsed = urlparse(URL)
-    base = f"{parsed.scheme}://{parsed.netloc}"
-    path = parsed.path or "/"
-    if not _robots_allowed(http, base, path):
-        print("robots: not allowed for this path — exiting")
-        return
-
-    out_path = Path(__file__).parent / "applicant_data.json"
-
-    # resume from existing file
-    rows = []
-    seen = set()
-    if out_path.exists():
+    while len(rows) < target:
+        page_url = f"{LIST_URL}?page={page}"
         try:
-            rows = json.loads(out_path.read_text(encoding="utf-8"))
-            for r in rows:
-                u = r.get("entry_url", "")
-                if u:
-                    seen.add(u)
-            print(f"resume: {len(rows)} records")
+            html = _http_get(http, page_url)
         except Exception:
-            rows = []
-            seen = set()
-
-    # first page
-    if len(rows) < TARGET:
-        html = _http_get(http, URL)
-        page_rows = _extract_rows_from_html(html, URL, seen)
-        if page_rows:
-            rows.extend(page_rows)
-            # fast write (no pretty printing)
-            out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-            print(f"page 1 +{len(page_rows)} total {len(rows)}")
-
-    # paginate; tiny delay; save after each page (compact json for speed)
-    page = 2
-    while len(rows) < TARGET:
-        page_url = f"{URL}?page={page}"
-        html = _http_get(http, page_url)
-        before = len(rows)
-        page_rows = _extract_rows_from_html(html, page_url, seen)
-        rows.extend(page_rows)
-        added = len(rows) - before
-
-        out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        print(f"page {page} +{added} total {len(rows)}")
-
-        if added == 0:
             break
-        page += 1
-        time.sleep(0.05)  # keep a very small pause
 
-    # final line
-    print(f"saved: {out_path} ({len(rows)} records)")
+        page_rows = _extract_rows_from_list(html, seen)
+        if not page_rows:
+            break
+
+        # enrich page rows from detail and fix dates
+        for r in page_rows:
+            try:
+                det_html = _http_get(http, r["url"])
+                det = _parse_detail(det_html)
+                _apply_detail_and_fix_dates(r, det)
+            except Exception:
+                # keep the list-row data if detail fetch fails
+                pass
+
+        rows.extend(page_rows)
+        page += 1
+        # time.sleep(0.3)
+
+    return rows
+
+def save_data(rows: List[Dict[str, str]], path: Path) -> None:
+    # save json
+    path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
 if __name__ == "__main__":
-    main()
+    # run and tiny print
+    data = scrape_data()
+    print("total:", len(data))
+    print(json.dumps(data[:3], ensure_ascii=False, indent=2))
+    out_path = Path(__file__).parent / "applicant_data.json"
+    save_data(data, out_path)

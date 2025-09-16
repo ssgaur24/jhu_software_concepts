@@ -254,6 +254,49 @@ def run_all() -> List[str]:
 
     return lines
 
+# --- New Q11: Top 10 universities by number of entries for Fall 2025 ---
+
+def q11_top_unis_fall_2025(limit: int = 10):
+    """Return [(university, count), ...] for Fall 2025 using LLM fields first."""
+    sql = """
+        SELECT COALESCE(llm_generated_university, NULLIF(split_part(program, ' - ', 1), '')) AS uni,
+               COUNT(*) AS c
+          FROM public.applicants
+         WHERE term ILIKE 'Fall 2025'
+         GROUP BY 1
+         HAVING COALESCE(llm_generated_university, NULLIF(split_part(program, ' - ', 1), '')) IS NOT NULL
+         ORDER BY c DESC, uni ASC
+         LIMIT %s;
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (limit,))
+            return [(r[0], int(r[1])) for r in cur.fetchall()]
+
+# --- New Q12: Status breakdown (percentages) for Fall 2025  ---
+
+def q12_status_breakdown_fall_2025():
+    """Return [(status, pct_float), ...] for Fall 2025 using NUMERIC math (ROUND(...,2) requires NUMERIC in Postgres)."""
+    sql = """
+        WITH base AS (
+            SELECT status
+              FROM public.applicants
+             WHERE term ILIKE 'Fall 2025' AND status IS NOT NULL
+        ),
+        totals AS (
+            SELECT COUNT(*)::numeric AS n FROM base
+        )
+        SELECT b.status,
+               ROUND((COUNT(*)::numeric * 100) / NULLIF((SELECT n FROM totals), 0), 2) AS pct
+          FROM base b
+         GROUP BY b.status
+         ORDER BY pct DESC, b.status ASC;
+    """
+    from src.dal.pool import get_conn  # local import to match rest of file style
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return [(r[0], float(r[1])) for r in cur.fetchall()]
 
 if __name__ == "__main__":
     try:
