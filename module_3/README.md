@@ -1,10 +1,14 @@
 # Module 3 — SQL Data Analysis
 
+## Note
+- I am adding some optimizations to practice on the scrape feedback, please feel free to ignore the commits beyond this commit.
+
 ## Approach
 - Create one PostgreSQL table **`applicants`** with the required columns.
 - Provide **`load_data.py`** to initialize the schema and load the Module-2 cleaned JSON.
 - Keep categorical fields as **TEXT**, scores as **REAL**, and the date as **DATE**.
 - Print tiny checks only (counts and first IDs). Use batched inserts for speed.
+- On click of pull data, scrap the data, and clean the new data and insert it in the system.
 
 ## Structure
 ~~~
@@ -38,6 +42,12 @@ python -m pip install -r module_3/requirements.txt
 python -m pip install -r module_3/module_2_ref/requirements.txt
 ~~~
 
+## Steps to install the LLM module dependencies
+~~~bash
+cd module_3
+py -3.13 -m venv "../.venv" && "../.venv\Scripts\python" -m pip install -U pip wheel setuptools && "../.venv\Scripts\python" -m pip install --prefer-binary --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -r "module_2_ref\llm_hosting/requirements.txt"
+~~~
+
 ## Database config
 - Edit `module_3/config.ini`. If `DATABASE_URL` environment variable is present, it overrides `config.ini`.
 
@@ -67,7 +77,7 @@ python module_3/db_check.py
 - `status` → status (TEXT)  
 - `acceptance_date` / `rejection_date` / `date_added` → date_added (DATE)  
 - `start_term` → term (TEXT)  
-- `degree` → degree (REAL) — non-numeric becomes **NULL** (audited)  
+- `degree` → degree (TEXT)  -- Corrected readme with correct schema detail
 - `program` + `university` → program (TEXT; `"University - Program"` if both)  
 - `comments` → comments (TEXT)  
 - `entry_url` → url (TEXT) and `p_id` (digits after `/result/<id>`)  
@@ -83,10 +93,17 @@ Records without a stable id are skipped and reported.
 loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, 'date_parse_fail': 0, 'gpa_non_numeric': 0, 'gre_non_numeric': 0, 'gre_v_non_numeric': 0, 'gre_aw_non_numeric': 0, 'degree_non_numeric': 28596} sample_ids=[787144, 787145, 787146]
 ~~~
 
-## Planned follow-ups (concise)
-- **Missing `p_id`**: preserve `entry_url` in Module-2; add validation; log skipped rows to CSV.
+## Planned follow-ups 
+- **`p_id`**: Add validation; log skipped rows to CSV.
 - **`degree` textual**: keep `degree` as REAL; map text to numeric in Module-2 or use SQL CASE; NULLs are audited.
 - **Auditing**: `module_3/artifacts/load_report.json` keeps counts and sample ids.
+- **Sparse GPA/GRE**: expect NA where fields are absent. Document in limitations.pdf. 
+- **DB GUI visibility**: table is created as **public.applicants**; DBeaver may need **Invalidate/Reconnect** and schema selection. I also added schema qualification in all SQL to avoid ambiguity.
+- **Pool worker threads**: fixed by close_pool() and atexit.
+- **Module_2 use** : Using the module_2 files directly from the module_2 folder. New files will need to be created in module_2 to support API support.
+- **Pulled Data log**: Add proper logging on UI to show how many new records were pulled.
+- **Analysis Button**: Proper logging on UI to show which all analysis were impacted by new data pull.
+- **Look and feel**: Improve UI look and feel and to show proper messages in popup/alerts.
 
 ## Issues encountered (and fixes)
 - pip resolver conflicts on Windows / Python 3.13 → pin psycopg 3.2.x and install in `.venv`.
@@ -99,7 +116,8 @@ loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, '
 
 ## Part B — Webpage Buttons (Pull Data & Update Analysis)
 
-- **Pull Data**: Fetches only *new* entries from GradCafe (incremental), cleans/deduplicates them, runs the instructor’s LLM standardizer to populate `llm-generated-university` / `llm-generated-program`, and **loads the updated JSON into Postgres**. A small lock (`module_3/artifacts/pull.lock`) prevents overlapping pulls.
+- **Pull Data**: Fetches only *new* entries from GradCafe (incremental), cleans/deduplicates them, runs the instructor’s LLM standardizer to populate `llm-generated-university` / `llm-generated-program`, and
+- **loads the updated JSON into Postgres**. A small lock (`module_3/artifacts/pull.lock`) prevents overlapping pulls.
 - **Update Analysis**: Recomputes all on-page answers using the current database. If a pull is running, this button is disabled and does nothing (the page shows a notice).
 - Dependencies for the scraper (`urllib3`, `beautifulsoup4`) are installed automatically the first time **Pull Data** runs, based on `module_3/module_2_ref/requirements.txt`.
 - **Note:** Numbers (and even which questions have data) may vary by dataset and run; the page reflects the latest rows successfully loaded.
