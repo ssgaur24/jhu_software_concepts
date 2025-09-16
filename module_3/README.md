@@ -93,7 +93,6 @@ Records without a stable id are skipped and reported.
 loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, 'date_parse_fail': 0, 'gpa_non_numeric': 0, 'gre_non_numeric': 0, 'gre_v_non_numeric': 0, 'gre_aw_non_numeric': 0, 'degree_non_numeric': 28596} sample_ids=[787144, 787145, 787146]
 ~~~
 
-## Planned follow-ups 
 - **`p_id`**: Add validation; log skipped rows to CSV.
 - **`degree` textual**: keep `degree` as REAL; map text to numeric in Module-2 or use SQL CASE; NULLs are audited.
 - **Auditing**: `module_3/artifacts/load_report.json` keeps counts and sample ids.

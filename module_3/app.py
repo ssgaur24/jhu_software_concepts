@@ -5,9 +5,9 @@ Buttons (per Part B):
   2) Update Analysis  -> recompute/refresh answers ONLY if no pull is running
 
 Notes:
-- Uses LLM fields for university/program logic; caps: GPA<=5, GRE<=400.
-- Installs module_2_ref minimal deps (bs4, urllib3) on first Pull Data click if missing.
-- Nicer status alerts: level = info | success | error with short, user-friendly text.
+- Uses LLM fields for university/program logic; caps: GPA<=5, GRE<=400 (handled in queries).
+- Prints detailed subprocess stdout/stderr/return codes to the TERMINAL for every step,
+  so LLM errors are visible when Pull Data fails.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Iterable, Optional, Tuple, List
 
 from flask import Flask, render_template, jsonify, request, redirect, url_for
 
-from src.dal.pool import close_pool  # close threads on shutdown
+from src.dal.pool import close_pool  # clean shutdown
 from query_data import (
     q1_count_fall_2025,
     q2_pct_international,
@@ -33,13 +33,16 @@ from query_data import (
     q9_top5_accept_unis_2025,
     q10_avg_gre_by_status_year,
     q10_avg_gre_by_status_last_n_years,
+    # Optional extras; if not present in query_data.py, remove from imports.
+    q11_top_unis_fall_2025,
+    q12_status_breakdown_fall_2025,
 )
 
-app = Flask(__name__)  # create app
+app = Flask(__name__)
 
-# Paths: everything self-contained under module_3/
+# Paths (all under module_3/)
 M3_DIR = Path(__file__).resolve().parent
-M2_REF_DIR = M3_DIR / "module_2_ref"  # reuse of Module-2 pieces for buttons
+M2_REF_DIR = M3_DIR / "module_2_ref"
 M3_DATA = M3_DIR / "data"
 ART_DIR = M3_DIR / "artifacts"
 LOCK_FILE = ART_DIR / "pull.lock"
@@ -48,13 +51,11 @@ ART_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _fmt_float(x: Optional[float], nd: int = 2) -> str:
-    """Format float/None to fixed decimals or NA (student helper)."""
     return f"{x:.{nd}f}" if isinstance(x, (float, int)) else "NA"
 
 
 def _format_q3(gpa: Optional[float], gre: Optional[float],
                gre_v: Optional[float], gre_aw: Optional[float]) -> str:
-    """Build labeled average metrics string with NA suppression (student helper)."""
     parts: List[str] = []
     if gpa is not None:
         parts.append(f"Average GPA: {_fmt_float(gpa)}")
@@ -68,7 +69,6 @@ def _format_q3(gpa: Optional[float], gre: Optional[float],
 
 
 def _format_status_avgs(rows: Iterable[Tuple[str, Optional[float]]]) -> str:
-    """Format (status, avg) rows with NA suppression (student helper)."""
     parts = [f"{status}: {_fmt_float(avg)}" for status, avg in rows if avg is not None]
     return "NA" if not parts else ", ".join(parts)
 
@@ -81,18 +81,16 @@ def _run(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
 
-def _ensure_m2_deps() -> str:
-    """Install tiny scrape deps on demand (student helper)."""
-    req = M2_REF_DIR / "requirements.txt"
-    if req.exists():
-        rc, out, err = _run([sys.executable, "-m", "pip", "install", "-r", str(req)], cwd=M3_DIR)
-        return f"deps_rc={rc}"
-    rc, out, err = _run([sys.executable, "-m", "pip", "install", "urllib3>=2.2.0", "beautifulsoup4>=4.12.0"], cwd=M3_DIR)
-    return f"deps_rc={rc}"
+def _dump(step: str, rc: int, out: str, err: str) -> None:
+    """Print debug info for a pipeline step to the terminal."""
+    print(f"\n[PULL DEBUG] step={step} rc={rc}", flush=True)
+    if out:
+        print(f"[PULL DEBUG] {step} stdout:\n{out}\n", flush=True)
+    if err:
+        print(f"[PULL DEBUG] {step} stderr:\n{err}\n", flush=True)
 
 
 def _build_rows() -> List[Tuple[str, str]]:
-    """Compute all Q&A rows for rendering (student helper)."""
     q1 = q1_count_fall_2025()
     q2 = q2_pct_international()
     gpa, gre, gre_v, gre_aw = q3_avgs()
@@ -129,17 +127,35 @@ def _build_rows() -> List[Tuple[str, str]]:
         ("Average GRE by Status (last 3 calendar years).",
          _format_status_avgs(q10_last3)),
     ]
+
+    # Optional extra questions if present in query_data.py
+    try:
+        q11 = q11_top_unis_fall_2025(limit=10)
+        rows.append((
+            "Top 10 universities by number of entries for Fall 2025.",
+            (", ".join([f"{u}={c}" for (u, c) in q11]) if q11 else "NA"),
+        ))
+    except Exception:
+        pass
+
+    try:
+        q12 = q12_status_breakdown_fall_2025()
+        rows.append((
+            "Status breakdown for Fall 2025 (percent of entries).",
+            (", ".join([f"{s}={pct:.2f}%" for (s, pct) in q12]) if q12 else "NA"),
+        ))
+    except Exception:
+        pass
+
     return rows
 
 
 def _go(level: str, msg: str):
-    """Redirect to index with a status level (student helper)."""
     return redirect(url_for("index", msg=msg, level=level))
 
 
 @app.route("/")
 def index():
-    """Render Analysis with status message and footnote if audit file exists."""
     report_exists = (M3_DIR / "artifacts" / "load_report.json").exists()
     msg = request.args.get("msg", "")
     level = request.args.get("level", "info")
@@ -154,50 +170,49 @@ def index():
 
 @app.route("/pull-data", methods=["POST"])
 def pull_data():
-    """Button 1: scrape + clean + LLM + load (guarded by lock)."""
+    """Button 1: scrape + clean + LLM + load (guarded by lock, with terminal debug)."""
     if LOCK_FILE.exists():
         return _go("info", "A data pull is already running—please wait until it finishes.")
 
-    # create lock
     LOCK_FILE.write_text("running", encoding="utf-8")
     try:
-        _ensure_m2_deps()
+        # 0) deps (optional)
+        req = M2_REF_DIR / "requirements.txt"
+        if req.exists():
+            rc0, out0, err0 = _run([sys.executable, "-m", "pip", "install", "-r", str(req)], cwd=M3_DIR)
+            _dump("deps", rc0, out0, err0)
 
-        # 1) scrape (creates applicant_data.json in module_2_ref)
+        # 1) scrape
         rc1, out1, err1 = _run([sys.executable, "scrape.py"], cwd=M2_REF_DIR)
+        _dump("scrape", rc1, out1, err1)
         data_json = M2_REF_DIR / "applicant_data.json"
         if rc1 != 0 or not data_json.exists():
-            return _go(
-                "error",
-                "Pull failed while fetching new posts. The scraper did not produce "
-                "module_3/module_2_ref/applicant_data.json. Check network access and try again.",
-            )
+            return _go("error", "Pull failed in scrape step. See server console for details.")
 
         # 2) clean
         rc2, out2, err2 = _run([sys.executable, "clean.py"], cwd=M2_REF_DIR)
+        _dump("clean", rc2, out2, err2)
         if rc2 != 0:
-            return _go("error", "Pull failed at the clean step. See console for details.")
+            return _go("error", "Pull failed in clean step. See server console for details.")
 
-        # 3) LLM standardize -> llm_extend_applicant_data.json
-        llm_dir = M2_REF_DIR / "llm_hosting"
-        if not llm_dir.exists():
-            return _go("error", "LLM files missing at module_3/module_2_ref/llm_hosting.")
+        # 3) LLM standardize
         rc3, out3, err3 = _run([sys.executable, "run.py"], cwd=M2_REF_DIR)
+        _dump("llm", rc3, out3, err3)
         out_json = M2_REF_DIR / "llm_extend_applicant_data.json"
-        if rc3 != 0 or not out_json.exists():
-            return _go("error", "LLM step completed with errors—could not produce standardized JSON.")
+        if rc3 != 0 or not out_json.exists() or out_json.stat().st_size == 0:
+            return _go("error", "LLM step failed (no standardized JSON). Check the terminal for rc/stdout/stderr.")
 
-        # 4) copy to module_3/data and load
+        # 4) load
         dest = M3_DATA / "module_2llm_extend_applicant_data.json"
         dest.write_text(out_json.read_text(encoding="utf-8"), encoding="utf-8")
         rc4, out4, err4 = _run(
             [sys.executable, "load_data.py", "--init", "--load", str(dest), "--batch", "2000", "--count"],
             cwd=M3_DIR,
         )
+        _dump("load", rc4, out4, err4)
         if rc4 != 0:
-            return _go("error", "Database load failed. Check database connectivity and config.")
+            return _go("error", "Database load failed. See server console for details.")
 
-        # success summary
         row_count = None
         m = re.search(r"row_count=(\d+)", out4 or "")
         if m:
@@ -216,7 +231,6 @@ def pull_data():
 
 @app.route("/update-analysis", methods=["POST"])
 def update_analysis():
-    """Button 2: refresh answers only if no pull is running."""
     if LOCK_FILE.exists():
         return _go("info", "A data pull is running; Update Analysis is temporarily disabled.")
     return _go("success", "Analysis refreshed with the most recent data in the database.")
@@ -224,16 +238,13 @@ def update_analysis():
 
 @app.route("/health")
 def health():
-    """Tiny health endpoint."""
     return jsonify(ok=True)
 
 
 @app.teardown_appcontext
 def _shutdown(exc):
-    """Close the pool threads when the app stops (student cleanup)."""
     close_pool()
 
 
 if __name__ == "__main__":
-    # run simple dev server
     app.run(host="127.0.0.1", port=5000)

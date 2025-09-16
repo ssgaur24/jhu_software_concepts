@@ -1,13 +1,11 @@
 {% extends 'base.html' %}
-
 {% block content %}
   <h1>{% block title %} Grad School Cafe Data Analysis {% endblock %}</h1>
 
-  <!-- Controls: Part B buttons -->
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
     <div>
-      <form method="post" action="{{ url_for('pull_data') }}" style="display:inline;">
-        <button type="submit" {% if pull_running %}disabled{% endif %}>Pull Data</button>
+      <form method="post" action="{{ url_for('pull_data') }}" style="display:inline;" id="pull-form">
+        <button type="submit" id="btn-pull" {% if pull_running %}disabled{% endif %}>Pull Data</button>
       </form>
       <div style="font-size:0.9em; color:#444; margin-top:4px;">
         Fetches new GradCafe entries since last run, standardizes them, and loads into the database.
@@ -15,8 +13,8 @@
     </div>
 
     <div style="text-align:right;">
-      <form method="post" action="{{ url_for('update_analysis') }}" style="display:inline;">
-        <button type="submit" {% if pull_running %}disabled{% endif %}>Update Analysis</button>
+      <form method="post" action="{{ url_for('update_analysis') }}" style="display:inline;" id="update-form">
+        <button type="submit" id="btn-update" {% if pull_running %}disabled{% endif %}>Update Analysis</button>
       </form>
       <div style="font-size:0.9em; color:#444; margin-top:4px;">
         Recomputes all answers with the newest rows (disabled while data pull is running).
@@ -30,6 +28,7 @@
       .alert.info { background:#eef5ff; border-left:4px solid #5b9bd5; color:#15395b; }
       .alert.success { background:#e8f6ee; border-left:4px solid #2e7d32; color:#0f5132; }
       .alert.error { background:#fdecec; border-left:4px solid #c62828; color:#5c1a1a; }
+      button[disabled]{ opacity:.6; cursor:not-allowed; }
     </style>
     <div class="alert {{ status_level|default('info') }}">
       {{ status_msg }}
@@ -37,7 +36,6 @@
   {% endif %}
 
   <h2 style="margin-top:18px;">Analysis</h2>
-
   <style>
     .qa-card { background: #f5f3f3; padding: 16px; margin: 18px 0; border-radius: 6px; }
     .qa-card h3 { margin: 0 0 8px 0; font-weight: 600; }
@@ -46,10 +44,32 @@
   </style>
 
   {% for row in rows %}
-    <div class="qa-card">
-      <h3>{{ row[0] }}</h3>
-      <p>Answer: {{ row[1] }}</p>
-    </div>
+    <div class="qa-card"><h3>{{ row[0] }}</h3><p>Answer: {{ row[1] }}</p></div>
   {% endfor %}
 
+  <script>
+    const PULL_RUNNING = {{ 'true' if pull_running else 'false' }};
+    (function () {
+      function disableAll() {
+        var pull = document.getElementById('btn-pull');
+        var upd  = document.getElementById('btn-update');
+        if (pull) { pull.disabled = true; pull.textContent = 'Pulling…'; }
+        if (upd)  { upd.disabled  = true;  upd.textContent  = 'Updating…'; }
+      }
+      function enableAll() {
+        if (!PULL_RUNNING) {
+          var pull = document.getElementById('btn-pull');
+          var upd  = document.getElementById('btn-update');
+          if (pull) { pull.disabled = false; pull.textContent = 'Pull Data'; }
+          if (upd)  { upd.disabled  = false;  upd.textContent  = 'Update Analysis'; }
+        }
+      }
+      var pf = document.getElementById('pull-form');
+      var uf = document.getElementById('update-form');
+      if (pf) pf.addEventListener('submit', disableAll);
+      if (uf) uf.addEventListener('submit', disableAll);
+      window.addEventListener('pageshow', enableAll);
+      document.addEventListener('DOMContentLoaded', enableAll);
+    })();
+  </script>
 {% endblock %}
