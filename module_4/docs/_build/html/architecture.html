@@ -1,0 +1,256 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Architecture &mdash; Grad Cafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="api.html" />
+    <link rel="prev" title="Overview &amp; Setup" href="overview.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            Grad Cafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#system-architecture-overview">System Architecture Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#web-layer-flask">Web Layer (Flask)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#etl-layer-extract-transform-load">ETL Layer (Extract, Transform, Load)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#database-layer">Database Layer</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#applicants">applicants</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#configuration-management">Configuration Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#testing-architecture">Testing Architecture</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="testing.html">Testing Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="operational.html">Operational Notes</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Grad Cafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Architecture</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/architecture.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="architecture">
+<h1>Architecture<a class="headerlink" href="#architecture" title="Link to this heading"></a></h1>
+<section id="system-architecture-overview">
+<h2>System Architecture Overview<a class="headerlink" href="#system-architecture-overview" title="Link to this heading"></a></h2>
+<p>The Grad Cafe Analytics system follows a layered architecture with three primary components:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>┌─────────────────────────────────────────┐
+│              Web Layer                  │
+│        (Flask Application)              │
+├─────────────────────────────────────────┤
+│              ETL Layer                  │
+│     (Scrape → Clean → LLM → Load)       │
+├─────────────────────────────────────────┤
+│            Database Layer               │
+│         (PostgreSQL + DAL)              │
+└─────────────────────────────────────────┘
+</pre></div>
+</div>
+</section>
+<section id="web-layer-flask">
+<h2>Web Layer (Flask)<a class="headerlink" href="#web-layer-flask" title="Link to this heading"></a></h2>
+<p><strong>Responsibilities:</strong></p>
+<ul class="simple">
+<li><p>Serves the analysis page with interactive controls</p></li>
+<li><p>Handles user requests for data pulls and analysis updates</p></li>
+<li><p>Manages busy-state behavior during long-running operations</p></li>
+<li><p>Renders analysis results with proper formatting</p></li>
+</ul>
+<p><strong>Key Components:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">flask_app.py</span></code>: Main Flask application factory</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">templates/</span></code>: HTML templates for web pages</p></li>
+<li><p>Route handlers for <code class="docutils literal notranslate"><span class="pre">/</span></code>, <code class="docutils literal notranslate"><span class="pre">/analysis</span></code>, <code class="docutils literal notranslate"><span class="pre">/pull-data</span></code>, <code class="docutils literal notranslate"><span class="pre">/update-analysis</span></code></p></li>
+</ul>
+<p><strong>Design Patterns:</strong></p>
+<ul class="simple">
+<li><p>Application factory pattern for testability</p></li>
+<li><p>Busy-state management with lock files</p></li>
+<li><p>JSON API responses for AJAX interactions</p></li>
+</ul>
+</section>
+<section id="etl-layer-extract-transform-load">
+<h2>ETL Layer (Extract, Transform, Load)<a class="headerlink" href="#etl-layer-extract-transform-load" title="Link to this heading"></a></h2>
+<p><strong>Data Pipeline Stages:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Scrape</strong> (<code class="docutils literal notranslate"><span class="pre">src/module_2_ref/scrape.py</span></code>)
+- Extracts data from The Grad Cafe website
+- Handles incremental updates and resume capability
+- Respects robots.txt and implements polite delays</p></li>
+<li><p><strong>Clean</strong> (<code class="docutils literal notranslate"><span class="pre">src/module_2_ref/clean.py</span></code>)
+- Normalizes data formats and fills missing fields
+- Strips HTML tags from comments
+- Standardizes field names and data types</p></li>
+<li><p><strong>LLM Standardization</strong> (<code class="docutils literal notranslate"><span class="pre">src/module_2_ref/run.py</span></code>)
+- Uses local LLM to standardize university and program names
+- Runs incrementally on new data only
+- Supports separate Python interpreter for LLM host</p></li>
+<li><p><strong>Load</strong> (<code class="docutils literal notranslate"><span class="pre">src/load_data.py</span></code>)
+- Bulk inserts data into PostgreSQL
+- Handles data type conversions and validation
+- Implements idempotency through unique constraints</p></li>
+</ol>
+<p><strong>Execution Flow:</strong></p>
+<p>The ETL pipeline runs as a coordinated sequence triggered by the <code class="docutils literal notranslate"><span class="pre">/pull-data</span></code> endpoint:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Pseudo-code flow</span>
+<span class="n">scrape</span><span class="p">()</span> <span class="err">→</span> <span class="n">clean</span><span class="p">()</span> <span class="err">→</span> <span class="n">llm_standardize</span><span class="p">()</span> <span class="err">→</span> <span class="n">load_to_db</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="database-layer">
+<h2>Database Layer<a class="headerlink" href="#database-layer" title="Link to this heading"></a></h2>
+<p><strong>Schema Design:</strong></p>
+<ul class="simple">
+<li><p>Single table <code class="docutils literal notranslate"><span class="pre">public.applicants</span></code> with comprehensive fields</p></li>
+<li><p>Primary key on <code class="docutils literal notranslate"><span class="pre">p_id</span></code> (extracted from entry URLs)</p></li>
+<li><p>Support for both raw and LLM-standardized data</p></li>
+</ul>
+<p><strong>Data Access Layer (DAL):</strong></p>
+<ul class="simple">
+<li><p>Connection pooling via <code class="docutils literal notranslate"><span class="pre">src/dal/pool.py</span></code></p></li>
+<li><p>Schema management in <code class="docutils literal notranslate"><span class="pre">src/dal/schema.py</span></code></p></li>
+<li><p>Data loading utilities in <code class="docutils literal notranslate"><span class="pre">src/dal/loader.py</span></code></p></li>
+</ul>
+<p><strong>Query Layer:</strong></p>
+<ul class="simple">
+<li><p>Analysis functions in <code class="docutils literal notranslate"><span class="pre">src/query_data.py</span></code></p></li>
+<li><p>Parameterized queries for security</p></li>
+<li><p>Statistical aggregations with proper filtering</p></li>
+</ul>
+<p><strong>Key Tables:</strong></p>
+<section id="applicants">
+<h3>applicants<a class="headerlink" href="#applicants" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">p_id</span></code> (INTEGER PRIMARY KEY): Unique identifier</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">program,</span> <span class="pre">university</span></code>: Institution and program information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">status,</span> <span class="pre">term</span></code>: Application status and term</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpa,</span> <span class="pre">gre,</span> <span class="pre">gre_v,</span> <span class="pre">gre_aw</span></code>: Academic metrics</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llm_generated_university,</span> <span class="pre">llm_generated_program</span></code>: Standardized names</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">date_added,</span> <span class="pre">comments,</span> <span class="pre">url</span></code>: Metadata and references</p></li>
+</ul>
+</section>
+</section>
+<section id="configuration-management">
+<h2>Configuration Management<a class="headerlink" href="#configuration-management" title="Link to this heading"></a></h2>
+<p><strong>Configuration Resolution Order:</strong></p>
+<ol class="arabic simple">
+<li><p>Environment variable <code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">module_4/config.local.ini</span></code> (local development)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">module_4/config.ini</span></code> (default configuration)</p></li>
+</ol>
+<p><strong>Security Considerations:</strong></p>
+<ul class="simple">
+<li><p>No hardcoded credentials</p></li>
+<li><p>Environment-based configuration for production</p></li>
+<li><p>Connection pooling with automatic cleanup</p></li>
+<li><p>Parameterized queries to prevent SQL injection</p></li>
+</ul>
+</section>
+<section id="testing-architecture">
+<h2>Testing Architecture<a class="headerlink" href="#testing-architecture" title="Link to this heading"></a></h2>
+<p><strong>Test Categories:</strong></p>
+<ul class="simple">
+<li><p><strong>Web tests</strong>: Flask route and page rendering validation</p></li>
+<li><p><strong>Button tests</strong>: Interactive endpoint behavior and busy-state gating</p></li>
+<li><p><strong>Analysis tests</strong>: Output formatting and percentage precision</p></li>
+<li><p><strong>Database tests</strong>: Schema operations and data integrity</p></li>
+<li><p><strong>Integration tests</strong>: End-to-end workflow validation</p></li>
+</ul>
+<p><strong>Test Isolation:</strong></p>
+<ul class="simple">
+<li><p>Fake database connections for unit tests</p></li>
+<li><p>Mocked external dependencies (scraping, LLM)</p></li>
+<li><p>Test-specific configuration overrides</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="overview.html" class="btn btn-neutral float-left" title="Overview &amp; Setup" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="api.html" class="btn btn-neutral float-right" title="API Reference" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Shraddha Shree.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

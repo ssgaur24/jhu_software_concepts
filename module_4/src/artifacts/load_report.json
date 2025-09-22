@@ -1,0 +1,14 @@
+{
+  "total_records": 0,
+  "inserted": 0,
+  "skipped_without_id": 0,
+  "issue_counts": {
+    "missing_p_id": 0,
+    "date_parse_fail": 0,
+    "gpa_non_numeric": 0,
+    "gre_non_numeric": 0,
+    "gre_v_non_numeric": 0,
+    "gre_aw_non_numeric": 0
+  },
+  "sample_ids": []
+}
