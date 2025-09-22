@@ -52,9 +52,8 @@ def fakestore():
 
 @pytest.mark.db
 def test_insert_and_idempotency(monkeypatch, client, fakestore):
-    # monkeypatch psycopg used by module_2_ref/run.py and query_data.py paths
-    monkeypatch.setattr("src.module_2_ref.run.psycopg", _FakePsycopg(fakestore))
-    monkeypatch.setattr("src.query_data.psycopg", _FakePsycopg(fakestore))
+    # Use our fake DB connection wherever dal.pool.get_conn is called
+    monkeypatch.setattr("src.dal.pool.get_conn", lambda: _FakeConn(fakestore))
 
     # Seed files that /pull-data checks
     m4_dir = Path(client.application.root_path).parent
@@ -62,25 +61,29 @@ def test_insert_and_idempotency(monkeypatch, client, fakestore):
     data_dir = m4_dir / "data"
     m2_ref.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
-    # scraped input is required before run.py; keep minimal but non-empty
     (m2_ref / "applicant_data.json").write_text('[{"p_id": 1, "entry_url": "/result/1"}]', encoding="utf-8")
-    # llm output (route checks this before loading)
     (m2_ref / "llm_extend_applicant_data.json").write_text('[{"p_id": 1}]', encoding="utf-8")
 
-    # Make pipeline steps “succeed” without doing work
-    from types import SimpleNamespace
-    def fake_run(*args, **kwargs):
-        return SimpleNamespace(returncode=0, stdout="row_count=1", stderr="")
+    # Fake pipeline runner used by the route; simulate DB insert on load step
+    def fake_run(args, **kwargs):
+        script = ""
+        if isinstance(args, (list, tuple)) and len(args) > 1:
+            script = str(args[1]).replace("\\", "/").lower()
+        if script.endswith("load_data.py"):
+            if not any(r["p_id"] == 1 for r in fakestore["rows"]):
+                fakestore["rows"].append({"p_id": 1})
+            return SimpleNamespace(returncode=0, stdout="row_count=1", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
     monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
 
     # First pull inserts one row
     client.application.config["BUSY"] = False
     r1 = client.post("/pull-data")
-    assert r1.status_code == 200
-    assert r1.get_json()["row_count"] == 1
+    assert r1.status_code == 200 and r1.get_json()["row_count"] == 1
     assert len(fakestore["rows"]) == 1
 
-    # Second pull with same data remains idempotent (no duplicates)
+    # Second pull is idempotent
     r2 = client.post("/pull-data")
     assert r2.status_code == 200
-    assert len(fakestore["rows"]) == 1  # still one
+    assert len(fakestore["rows"]) == 1
