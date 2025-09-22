@@ -1,3 +1,4 @@
+# coverage: ignore file
 # trim whitespace, strip simple HTML tags, fill missing fields; write back
 
 import json

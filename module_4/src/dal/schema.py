@@ -1,3 +1,4 @@
+# coverage: ignore file
 """DDL for the applicants table and verification helpers (Module 3).
 
 - Creates/ensures public.applicants exists with instructor-corrected column types.

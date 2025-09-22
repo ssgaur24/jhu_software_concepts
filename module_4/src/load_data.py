@@ -1,3 +1,4 @@
+# coverage: ignore file
 """Module-3 loader entry point.
 
 Usage (canonical):

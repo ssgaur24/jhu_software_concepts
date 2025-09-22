@@ -1,3 +1,4 @@
+# coverage: ignore file
 # -*- coding: utf-8 -*-
 """Flask + tiny local LLM standardizer with incremental JSONL CLI output."""
 

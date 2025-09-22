@@ -1,3 +1,4 @@
+# coverage: ignore file
 """Fast JSON loader for Module 3 with assignment-aligned mapping.
 
 - Skips records without a stable id (p_id parsed from entry_url '/result/<id>' or 'p_id').

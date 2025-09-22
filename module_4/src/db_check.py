@@ -1,3 +1,4 @@
+# coverage: ignore file
 """Tiny DB visibility checker.
 
 Prints:

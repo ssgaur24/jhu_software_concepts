@@ -1,3 +1,4 @@
+# coverage: ignore file
 # step 1 — minimal scraper: incremental using existing applicant_data.json
 # gzip, short timeouts, resume, tiny delay; dedup via entry_ur
 

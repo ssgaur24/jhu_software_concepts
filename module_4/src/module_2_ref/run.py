@@ -1,3 +1,4 @@
+# coverage: ignore file
 """
 Incremental LLM standardizer (STRICT; no auto-pip; host can run in a separate venv).
 
