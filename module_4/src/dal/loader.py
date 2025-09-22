@@ -9,7 +9,7 @@
 - Accepts LLM fields with underscore OR hyphen keys:
     llm_generated_program  | llm-generated-program
     llm_generated_university| llm-generated-university
-- Writes a concise audit report to module_3/artifacts/load_report.json.
+- Writes a concise audit report to module_4/artifacts/load_report.json.
 """
 
 from __future__ import annotations

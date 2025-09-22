@@ -2,8 +2,8 @@
 
 Resolution order for the PostgreSQL URL:
 1) ENV var DATABASE_URL (if set),
-2) module_3/config.local.ini,
-3) module_3/config.ini.
+2) module_4/config.local.ini,
+3) module_4/config.ini.
 
 Utility functions also expose the selected source for debugging.
 """
@@ -15,8 +15,8 @@ from urllib.parse import quote, urlparse, urlunparse
 
 
 def _ini_path(fname: str) -> pathlib.Path:
-    """Absolute path to an INI filename adjacent to module_3/."""
-    return pathlib.Path(__file__).resolve().parents[1] / fname  # locate file next to module_3/
+    """Absolute path to an INI filename adjacent to module_4/."""
+    return pathlib.Path(__file__).resolve().parents[1] / fname  # locate file next to module_4/
 
 
 def _build_url(user: str, password: str, host: str, port: str, database: str) -> str:

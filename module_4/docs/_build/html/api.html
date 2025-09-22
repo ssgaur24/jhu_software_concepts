@@ -1,0 +1,407 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Reference &mdash; Grad Cafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Testing Guide" href="testing.html" />
+    <link rel="prev" title="Architecture" href="architecture.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            Grad Cafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#flask-application-flask-app-py">Flask Application (flask_app.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#data-loading-load-data-py">Data Loading (load_data.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#query-functions-query-data-py">Query Functions (query_data.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#configuration-management-config-py">Configuration Management (config.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#database-check-utilities-db-check-py">Database Check Utilities (db_check.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#data-access-layer">Data Access Layer</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#connection-pool-dal-pool-py">Connection Pool (dal/pool.py)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#schema-management-dal-schema-py">Schema Management (dal/schema.py)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#data-loader-dal-loader-py">Data Loader (dal/loader.py)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#etl-modules-module-2-ref">ETL Modules (module_2_ref)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#data-scraping-scrape-py">Data Scraping (scrape.py)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#data-cleaning-clean-py">Data Cleaning (clean.py)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#llm-processing-run-py">LLM Processing (run.py)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#flask-routes-reference">Flask Routes Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#database-schema">Database Schema</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="testing.html">Testing Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="operational.html">Operational Notes</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Grad Cafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">API Reference</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/api.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="api-reference">
+<h1>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h1>
+<p>This section provides API documentation for the key modules in the Grad Cafe Analytics system.</p>
+<section id="flask-application-flask-app-py">
+<h2>Flask Application (flask_app.py)<a class="headerlink" href="#flask-application-flask-app-py" title="Link to this heading"></a></h2>
+<p>Main Flask application module providing web interface and ETL orchestration.</p>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">create_app(config_overrides=None)</span></code></dt><dd><p>Flask application factory function.</p>
+<p><strong>Parameters:</strong>
+- <code class="docutils literal notranslate"><span class="pre">config_overrides</span></code> (dict, optional): Configuration overrides for testing</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">Flask</span></code>: Configured Flask application instance</p>
+</dd>
+</dl>
+<p><strong>Routes:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/</span></code> - Redirect to analysis page</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/analysis</span></code> - Main analysis dashboard</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/pull-data</span></code> - Trigger ETL pipeline</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/update-analysis</span></code> - Refresh analysis calculations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/health</span></code> - Health check endpoint</p></li>
+</ul>
+</section>
+<section id="data-loading-load-data-py">
+<h2>Data Loading (load_data.py)<a class="headerlink" href="#data-loading-load-data-py" title="Link to this heading"></a></h2>
+<p>Command-line interface for database operations and data loading.</p>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">main()</span></code></dt><dd><p>Primary entry point for data loading operations.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></dt><dd><p>Parse command-line arguments for the loader.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">argparse.Namespace</span></code>: Parsed command-line arguments</p>
+</dd>
+</dl>
+</section>
+<section id="query-functions-query-data-py">
+<h2>Query Functions (query_data.py)<a class="headerlink" href="#query-functions-query-data-py" title="Link to this heading"></a></h2>
+<p>Database query functions for analysis calculations.</p>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">q1_count_fall_2025()</span></code></dt><dd><p>Count Fall 2025 applicants.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">int</span></code>: Number of Fall 2025 entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q2_pct_international()</span></code></dt><dd><p>Calculate percentage of international students.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">float</span></code>: Percentage of international students</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q3_avgs()</span></code></dt><dd><p>Calculate average GPA, GRE scores.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">tuple</span></code>: (avg_gpa, avg_gre, avg_gre_v, avg_gre_aw)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q4_avg_gpa_american_fall2025()</span></code></dt><dd><p>Average GPA for American students in Fall 2025.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">float</span></code> or <code class="docutils literal notranslate"><span class="pre">None</span></code>: Average GPA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q5_pct_accept_fall2025()</span></code></dt><dd><p>Acceptance rate for Fall 2025.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">float</span></code>: Percentage accepted</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q6_avg_gpa_accept_fall2025()</span></code></dt><dd><p>Average GPA for accepted Fall 2025 applicants.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">float</span></code> or <code class="docutils literal notranslate"><span class="pre">None</span></code>: Average GPA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q7_count_jhu_masters_cs()</span></code></dt><dd><p>Count JHU Computer Science Masters applications.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">int</span></code>: Number of matching entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q8_count_2025_georgetown_phd_cs_accept()</span></code></dt><dd><p>Count Georgetown CS PhD acceptances in 2025.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">int</span></code>: Number of matching entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q9_top5_accept_unis_2025()</span></code></dt><dd><p>Top 5 universities by acceptance count in 2025.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">list</span></code>: List of (university, count) tuples</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">q10_avg_gre_by_status_year(year)</span></code></dt><dd><p>Average GRE scores by status for a specific year.</p>
+<p><strong>Parameters:</strong>
+- <code class="docutils literal notranslate"><span class="pre">year</span></code> (int): Calendar year to analyze</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">list</span></code>: List of (status, avg_gre) tuples</p>
+</dd>
+</dl>
+</section>
+<section id="configuration-management-config-py">
+<h2>Configuration Management (config.py)<a class="headerlink" href="#configuration-management-config-py" title="Link to this heading"></a></h2>
+<p>Database configuration resolution and URL management.</p>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">database_url()</span></code></dt><dd><p>Get the database URL from environment or config files.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">str</span></code>: PostgreSQL connection URL</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">database_url_and_source()</span></code></dt><dd><p>Get database URL and its configuration source.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">tuple</span></code>: (url, source_description)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">masked_url(url)</span></code></dt><dd><p>Mask password in URL for safe logging.</p>
+<p><strong>Parameters:</strong>
+- <code class="docutils literal notranslate"><span class="pre">url</span></code> (str): Database URL with potential password</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">str</span></code>: URL with password redacted</p>
+</dd>
+</dl>
+</section>
+<section id="database-check-utilities-db-check-py">
+<h2>Database Check Utilities (db_check.py)<a class="headerlink" href="#database-check-utilities-db-check-py" title="Link to this heading"></a></h2>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">main()</span></code></dt><dd><p>Print database connection status and basic statistics.</p>
+<p>Displays:
+- Configuration source and masked URL
+- Current database, user, and schema
+- Whether applicants table exists
+- Row count if table exists</p>
+</dd>
+</dl>
+</section>
+<section id="data-access-layer">
+<h2>Data Access Layer<a class="headerlink" href="#data-access-layer" title="Link to this heading"></a></h2>
+<section id="connection-pool-dal-pool-py">
+<h3>Connection Pool (dal/pool.py)<a class="headerlink" href="#connection-pool-dal-pool-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">get_conn()</span></code></dt><dd><p>Get a pooled database connection.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">psycopg.Connection</span></code>: Database connection (context manager)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">close_pool()</span></code></dt><dd><p>Close the connection pool and stop worker threads.</p>
+</dd>
+</dl>
+</section>
+<section id="schema-management-dal-schema-py">
+<h3>Schema Management (dal/schema.py)<a class="headerlink" href="#schema-management-dal-schema-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">init_schema()</span></code></dt><dd><p>Create or verify the database schema.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">count_rows()</span></code></dt><dd><p>Count total rows in the applicants table.</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">int</span></code>: Number of rows</p>
+</dd>
+</dl>
+</section>
+<section id="data-loader-dal-loader-py">
+<h3>Data Loader (dal/loader.py)<a class="headerlink" href="#data-loader-dal-loader-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">load_json(path,</span> <span class="pre">batch=2000)</span></code></dt><dd><p>Load JSON data into the database.</p>
+<p><strong>Parameters:</strong>
+- <code class="docutils literal notranslate"><span class="pre">path</span></code> (str): Path to JSON file
+- <code class="docutils literal notranslate"><span class="pre">batch</span></code> (int): Batch size for inserts</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">tuple</span></code>: (total_records, inserted, skipped, issues, report_path)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">first_ids(path,</span> <span class="pre">k=3)</span></code></dt><dd><p>Get first k stable IDs from JSON file.</p>
+<p><strong>Parameters:</strong>
+- <code class="docutils literal notranslate"><span class="pre">path</span></code> (str): Path to JSON file
+- <code class="docutils literal notranslate"><span class="pre">k</span></code> (int): Number of IDs to return</p>
+<p><strong>Returns:</strong>
+- <code class="docutils literal notranslate"><span class="pre">list</span></code>: List of integer IDs</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="etl-modules-module-2-ref">
+<h2>ETL Modules (module_2_ref)<a class="headerlink" href="#etl-modules-module-2-ref" title="Link to this heading"></a></h2>
+<section id="data-scraping-scrape-py">
+<h3>Data Scraping (scrape.py)<a class="headerlink" href="#data-scraping-scrape-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">main()</span></code></dt><dd><p>Primary scraping entry point.</p>
+<p>Features:
+- Incremental scraping with resume capability
+- Robots.txt compliance
+- Polite delays between requests
+- Detail page enrichment</p>
+</dd>
+</dl>
+</section>
+<section id="data-cleaning-clean-py">
+<h3>Data Cleaning (clean.py)<a class="headerlink" href="#data-cleaning-clean-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">main()</span></code></dt><dd><p>Clean and normalize scraped data.</p>
+<p>Operations:
+- Fill missing fields
+- Strip HTML tags from comments
+- Standardize whitespace</p>
+</dd>
+</dl>
+</section>
+<section id="llm-processing-run-py">
+<h3>LLM Processing (run.py)<a class="headerlink" href="#llm-processing-run-py" title="Link to this heading"></a></h3>
+<p><strong>Key Functions:</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">main()</span></code></dt><dd><p>Run LLM standardization on new data only.</p>
+<p>Features:
+- Incremental processing
+- Support for separate Python interpreter
+- University and program name standardization</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="flask-routes-reference">
+<h2>Flask Routes Reference<a class="headerlink" href="#flask-routes-reference" title="Link to this heading"></a></h2>
+<dl>
+<dt><strong>GET /</strong></dt><dd><p>Main analysis page redirect.</p>
+</dd>
+<dt><strong>GET /analysis</strong></dt><dd><p>Returns the analysis dashboard with current statistics and interactive controls.</p>
+<p><strong>Response</strong>: HTML page with:
+- Analysis results table
+- “Pull Data” button (<code class="docutils literal notranslate"><span class="pre">data-testid=&quot;pull-data-btn&quot;</span></code>)
+- “Update Analysis” button (<code class="docutils literal notranslate"><span class="pre">data-testid=&quot;update-analysis-btn&quot;</span></code>)</p>
+</dd>
+<dt><strong>POST /pull-data</strong></dt><dd><p>Triggers the complete ETL pipeline: scrape → clean → LLM → load.</p>
+<p><strong>Returns</strong>:
+- <code class="docutils literal notranslate"><span class="pre">200</span> <span class="pre">OK</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">true,</span> <span class="pre">&quot;row_count&quot;:</span> <span class="pre">N}</span></code> on success
+- <code class="docutils literal notranslate"><span class="pre">409</span> <span class="pre">Conflict</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;busy&quot;:</span> <span class="pre">true}</span></code> if operation already in progress
+- <code class="docutils literal notranslate"><span class="pre">500</span> <span class="pre">Internal</span> <span class="pre">Server</span> <span class="pre">Error</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">false,</span> <span class="pre">&quot;step&quot;:</span> <span class="pre">&quot;STEP_NAME&quot;}</span></code> on failure</p>
+</dd>
+<dt><strong>POST /update-analysis</strong></dt><dd><p>Refreshes analysis calculations (placeholder for future functionality).</p>
+<p><strong>Returns</strong>:
+- <code class="docutils literal notranslate"><span class="pre">200</span> <span class="pre">OK</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">true}</span></code> when not busy
+- <code class="docutils literal notranslate"><span class="pre">409</span> <span class="pre">Conflict</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;busy&quot;:</span> <span class="pre">true}</span></code> if pull operation in progress</p>
+</dd>
+<dt><strong>GET /health</strong></dt><dd><p>Health check endpoint.</p>
+<p><strong>Returns</strong>: <code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">true}</span></code></p>
+</dd>
+</dl>
+</section>
+<section id="database-schema">
+<h2>Database Schema<a class="headerlink" href="#database-schema" title="Link to this heading"></a></h2>
+<p>The system uses a single PostgreSQL table with the following structure:</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">public</span><span class="p">.</span><span class="n">applicants</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="n">p_id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">    </span><span class="n">program</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">comments</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">date_added</span><span class="w"> </span><span class="nb">DATE</span><span class="p">,</span>
+<span class="w">    </span><span class="n">url</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">status</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">term</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">us_or_international</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">gpa</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">gre</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">gre_v</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">gre_aw</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">degree</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">llm_generated_program</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">llm_generated_university</span><span class="w"> </span><span class="nb">TEXT</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p><strong>Field Descriptions:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">p_id</span></code>: Unique identifier extracted from entry URLs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">program</span></code>: Combined “University - Program” string</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">comments</span></code>: User comments/notes from the application</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">date_added</span></code>: Date the entry was added to GradCafe</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">url</span></code>: Source URL for the entry</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">status</span></code>: Application status (Accepted, Rejected, Wait listed, etc.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">term</span></code>: Application term (Fall 2025, Spring 2024, etc.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">us_or_international</span></code>: Student origin classification</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpa</span></code>: Grade Point Average (filtered ≤ 5.0)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gre</span></code>: GRE total score (filtered ≤ 400)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gre_v</span></code>: GRE Verbal score</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gre_aw</span></code>: GRE Analytical Writing score</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">degree</span></code>: Degree type sought</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llm_generated_program</span></code>: LLM-standardized program name</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llm_generated_university</span></code>: LLM-standardized university name</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="architecture.html" class="btn btn-neutral float-left" title="Architecture" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="testing.html" class="btn btn-neutral float-right" title="Testing Guide" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Shraddha Shree.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

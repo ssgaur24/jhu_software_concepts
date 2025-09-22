@@ -2,7 +2,7 @@
 """
 Incremental LLM standardizer (STRICT; no auto-pip; host can run in a separate venv).
 
-- Requires DB URL from env OR module_3/config.local.ini OR module_3/config.ini.
+- Requires DB URL from env OR module_4/config.local.ini OR module_4/config.ini.
   Supports either:
     [database] url=postgresql://user:pass@host:5432/db
   or:
@@ -33,8 +33,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg  # psycopg[binary]==3.2.10
 
-BASE = Path(__file__).parent            # .../module_3/module_2_ref
-CFG_ROOT = BASE.parent                  # .../module_3
+BASE = Path(__file__).parent            # .../module_4/src/module_2_ref
+CFG_ROOT = BASE.parent                  # .../module_4/src
 APP_PY = BASE / "llm_hosting" / "app.py"
 
 INPUT_JSON = BASE / "applicant_data.json"
@@ -112,8 +112,8 @@ def _get_db_url_required() -> str:
     candidates: List[Path] = [
         CFG_ROOT / "config.local.ini",
         CFG_ROOT / "config.ini",
-        Path.cwd() / "module_3" / "config.local.ini",
-        Path.cwd() / "module_3" / "config.ini",
+        Path.cwd() / "module_4" / "config.local.ini",
+        Path.cwd() / "module_4" / "config.ini",
         Path.cwd() / "config.local.ini",
         Path.cwd() / "config.ini",
     ]
@@ -164,10 +164,10 @@ def _require_import(host_py: str, module: str, pip_pkg: Optional[str] = None) ->
 def main() -> None:
     # Sanity checks
     if not APP_PY.exists():
-        print("LLM host app missing at module_3/module_2_ref/llm_hosting/app.py", flush=True)
+        print("LLM host app missing at module_4/src/module_2_ref/llm_hosting/app.py", flush=True)
         sys.exit(2)
     if not INPUT_JSON.exists():
-        print("Scraped input missing at module_3/module_2_ref/applicant_data.json", flush=True)
+        print("Scraped input missing at module_4/src/module_2_ref/applicant_data.json", flush=True)
         sys.exit(2)
 
     # DB config + current ids

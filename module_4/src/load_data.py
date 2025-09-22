@@ -2,8 +2,8 @@
 """Module-3 loader entry point.
 
 Usage (canonical):
-  python module_3/load_data.py --init \
-    --load module_3/data/module_2llm_extend_applicant_data.json \
+  python module_4/src/load_data.py --init \
+    --load module_4/data/module_2llm_extend_applicant_data.json \
     --batch 2000 --count
 
 - --init: create/verify schema (degree TEXT migration included)
