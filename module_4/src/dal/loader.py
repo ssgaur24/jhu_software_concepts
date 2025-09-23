@@ -111,8 +111,8 @@ def _map_record(rec: Dict[str, Any]) -> Dict[str, Any]:
     degree_val = rec.get("degree")
     if degree_val in (None, ""):
         degree_val = rec.get("Degree")  # tolerate title-cased key from some scrapers
-        if degree_val == "":
-            degree_val = None
+        #if degree_val == "":
+         #   degree_val = None
 
     mapped = {
         "p_id": p_id,
