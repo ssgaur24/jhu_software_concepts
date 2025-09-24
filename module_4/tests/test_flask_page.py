@@ -444,3 +444,4 @@ def test_pull_data_exception_in_finally_block(monkeypatch, client):
 
     # BUSY flag should still be cleared despite exception in finally
     assert app.config.get("BUSY") is False
+

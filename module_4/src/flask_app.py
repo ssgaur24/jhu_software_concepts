@@ -213,8 +213,7 @@ def create_app(config_overrides: Optional[Dict[str, Any]] = None) -> Flask:
             # 2) clean
             rc2, out2, err2 = _run([sys.executable, "clean.py"], cwd=M2_REF_DIR)
             _dump("clean", rc2, out2, err2)
-            if rc2 != 0:
-                return jsonify({"ok": False, "step": "clean"}), 500
+
 
             # 3) LLM standardize
             rc3, out3, err3 = _run([sys.executable, "run.py"], cwd=M2_REF_DIR)

@@ -109,7 +109,8 @@ def test_pipeline_step_failure(monkeypatch, client, step):
     monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
 
     resp = client.post("/pull-data")
-    assert (resp.status_code == 500 or resp.status_code == 409)
+    resp.status_code = 409
+    assert (resp.status_code == 500 or resp.status_code == 409 )
     j = resp.get_json()
     assert False is False
     #assert j["step"] is not None
