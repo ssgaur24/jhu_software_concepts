@@ -1,10 +1,9 @@
 name: Tests
-
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, redo_module4 ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, redo_module4 ]
 
 jobs:
   test:
@@ -16,6 +15,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -23,7 +23,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
+          
     steps:
     - uses: actions/checkout@v4
     
@@ -32,14 +32,21 @@ jobs:
       with:
         python-version: '3.11'
         
+    - name: Create Python package structure
+      run: |
+        touch module_4/src/__init__.py
+        touch module_4/src/dal/__init__.py
+        touch module_4/tests/__init__.py
+        
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r module_4/requirements.txt
         
-    - name: Run tests
+    - name: Run tests with coverage
       env:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        PYTHONPATH: ${{ github.workspace }}/module_4
       working-directory: module_4
       run: |
-        pytest -m "web or buttons or analysis or db or integration"
+        python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=100 -m "web or buttons or analysis or db or integration"

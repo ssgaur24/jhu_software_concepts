@@ -102,7 +102,7 @@ GitHub Actions automatically:
 
 ## Documentation
 
-Full API documentation available at: [Read the Docs Link]
+Full API documentation available at: https://module-4-shraddha.readthedocs.io/en/latest/
 
 ## License
 
