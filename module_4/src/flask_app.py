@@ -230,8 +230,7 @@ def create_app(config_overrides: Optional[Dict[str, Any]] = None) -> Flask:
                 cwd=M4_DIR,
             )
             _dump("load", rc4, out4, err4)
-            if rc4 != 0:
-                return jsonify({"ok": False, "step": "load"}), 500
+           
 
             # parse row count for info
             row_count = None
