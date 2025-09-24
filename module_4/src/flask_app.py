@@ -257,7 +257,10 @@ def create_app(config_overrides: Optional[Dict[str, Any]] = None) -> Flask:
         # Real code would recompute derived metrics here
         return jsonify({"ok": True}), 200
 
-
+    @app.get("/health")
+    def health():
+        """Health check endpoint."""
+        return jsonify({"status": "ok"}), 200
 
     # -- graceful pool shutdown
     @app.teardown_appcontext

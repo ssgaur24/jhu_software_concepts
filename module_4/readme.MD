@@ -22,7 +22,7 @@ A comprehensive test suite for the Grad Café analytics application built in Mod
 ### Installation
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/ssgaur24/jhu_software_concepts
 cd module_4
 pip install -r requirements.txt
 ```
@@ -31,7 +31,7 @@ pip install -r requirements.txt
 
 Set the database URL:
 ```bash
-export DATABASE_URL="postgresql://user:pass@localhost:5432/dbname"
+export DATABASE_URL="postgresql://user@localhost:5432/dbname"
 ```
 
 Or create `config.local.ini`:
@@ -41,7 +41,7 @@ host = localhost
 port = 5432
 database = testdb
 user = testuser
-password = testpass
+password = 
 ```
 
 ### Running Tests

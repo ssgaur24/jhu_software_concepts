@@ -5,5 +5,5 @@ pytest-cov==5.*
 beautifulsoup4==4.*
 lxml==5.*           # faster parser for HTML checks
 # Sphinx/Docs
-sphinx==7.*
-sphinx-rtd-theme==2.*
+sphinx>=4.0
+sphinx-rtd-theme>=1.0
