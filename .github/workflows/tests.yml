@@ -49,4 +49,4 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}/module_4
       working-directory: module_4
       run: |
-        python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=99 -m "web or buttons or analysis or db or integration"
+        python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=100 -m "web or buttons or analysis or db or integration"
