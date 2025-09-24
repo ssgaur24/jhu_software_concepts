@@ -114,9 +114,3 @@ def main():
         count = count_rows()
         print(f"row_count={count}")
 
-
-if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        close_pool()
