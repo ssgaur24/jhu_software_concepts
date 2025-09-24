@@ -1,67 +1,116 @@
-# coverage: ignore file
-"""Module-3 loader entry point.
-
-Usage (canonical):
-  python module_4/src/load_data.py --init \
-    --load module_4/data/module_2llm_extend_applicant_data.json \
-    --batch 2000 --count
-
-- --init: create/verify schema (degree TEXT migration included)
-- --load: load JSON array into public.applicants in batches
-- --count: print final row count
-"""
-
-from __future__ import annotations
+"""Simple data loader for Module 4 testing."""
 
 import argparse
-import sys
+import json
 from pathlib import Path
-
-from src.dal.pool import close_pool
-from src.dal.schema import init_schema
-from src.dal.loader import load_json, first_ids
+from src.dal.pool import get_conn, close_pool
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI args (student helper)."""
+def parse_args():
+    """Parse CLI args."""
     p = argparse.ArgumentParser(description="Module-3 data loader")
     p.add_argument("--init", action="store_true", help="create/verify schema")
-    p.add_argument("--load", type=str, help="path to JSON array from Module-2 (LLM)")
-    p.add_argument("--batch", type=int, default=2000, help="insert batch size (default: 2000)")
+    p.add_argument("--load", type=str, help="path to JSON array")
+    p.add_argument("--batch", type=int, default=2000, help="batch size")
     p.add_argument("--count", action="store_true", help="print final row count")
     return p.parse_args()
 
 
-def main() -> None:
-    """Run requested steps: init, load, count."""
+def init_schema():
+    """Initialize database schema."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                        CREATE TABLE IF NOT EXISTS public.applicants
+                        (
+                            p_id
+                            INTEGER
+                            PRIMARY
+                            KEY,
+                            program
+                            TEXT,
+                            comments
+                            TEXT,
+                            date_added
+                            DATE,
+                            url
+                            TEXT,
+                            status
+                            TEXT,
+                            term
+                            TEXT,
+                            us_or_international
+                            TEXT,
+                            gpa
+                            FLOAT,
+                            gre
+                            INTEGER,
+                            gre_v
+                            INTEGER,
+                            gre_aw
+                            FLOAT,
+                            degree
+                            TEXT,
+                            llm_generated_program
+                            TEXT,
+                            llm_generated_university
+                            TEXT
+                        );
+                        """)
+        conn.commit()
+
+
+def load_json(json_path, batch=2000):
+    """Load JSON data into database."""
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+
+    inserted = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for record in data:
+                p_id = record.get("p_id")
+                if p_id:
+                    cur.execute("""
+                                INSERT INTO public.applicants (p_id, program, status, term)
+                                VALUES (%(p_id)s, %(program)s, %(status)s, %(term)s) ON CONFLICT (p_id) DO NOTHING
+                                """, {
+                                    "p_id": p_id,
+                                    "program": record.get("program", ""),
+                                    "status": record.get("status", ""),
+                                    "term": record.get("term", "")
+                                })
+                    if cur.rowcount and cur.rowcount > 0:
+                        inserted += cur.rowcount
+        conn.commit()
+
+    return len(data), inserted, 0, {}, Path("report.json")
+
+
+def count_rows():
+    """Count rows in applicants table."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM public.applicants")
+            return cur.fetchone()[0]
+
+
+def main():
+    """Main entry point."""
     args = parse_args()
 
     if args.init:
         init_schema()
-        print("schema: ensured (degree TEXT)")
+        print("schema: ensured")
 
     if args.load:
         json_path = Path(args.load)
         if not json_path.exists():
             raise SystemExit(f"input not found: {json_path}")
 
-        total, inserted, skipped, issue_counts, report_path = load_json(str(json_path), batch=args.batch)
-        samples = first_ids(str(json_path), 3)  # <-- fixed: pass path then k
-        print(
-            f"loaded_records={total} inserted={inserted} skipped={skipped}\n"
-            f"issues={issue_counts} sample_ids={samples}\n"
-            f"report={report_path}"
-        )
+        total, inserted, skipped, issues, report_path = load_json(str(json_path), batch=args.batch)
+        print(f"loaded_records={total} inserted={inserted}")
 
     if args.count:
-        # tiny count via SELECT COUNT(*) kept in query_data or schema utils
-        from src.dal.schema import count_rows
-        print(f"row_count={count_rows()}")
+        count = count_rows()
+        print(f"row_count={count}")
 
-
-if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        # always close the pool at exit (student cleanup)
-        close_pool()

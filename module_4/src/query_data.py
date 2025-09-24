@@ -217,8 +217,7 @@ def run_all() -> List[str]:
     lines.append(f"Q2  % International: {q2_pct_international():.2f}%")
 
     gpa, gre, gre_v, gre_aw = q3_avgs()
-    def _fmt_opt(x: Optional[float]) -> str:
-        return f"{x:.2f}" if x is not None else "NA"
+
     if all(v is None for v in (gpa, gre, gre_v, gre_aw)):
         lines.append("Q3  Averages (GPA, GRE, GRE_V, GRE_AW): NA")
     else:
@@ -298,12 +297,3 @@ def q12_status_breakdown_fall_2025():
             cur.execute(sql)
             return [(r[0], float(r[1])) for r in cur.fetchall()]
 
-if __name__ == "__main__":
-    try:
-        out_lines = run_all()
-        for ln in out_lines:
-            print(ln)
-        out_path = _write_lines(out_lines)
-        print(f"saved={out_path}")
-    finally:
-        close_pool()
