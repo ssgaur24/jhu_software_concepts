@@ -259,11 +259,12 @@ def test_q11_top_unis_fall_2025(mock_db_operations):
 
 @pytest.mark.db
 def test_q12_status_breakdown_fall_2025():
-    """Test q12_status_breakdown_fall_2025 function - covers lines 279-298."""
-    # Mock the function directly to avoid database call
+    """Test q12_status_breakdown_fall_2025 function - covers line 298."""
+    # Mock the internal get_conn import inside the function
     with patch("src.query_data.get_conn") as mock_get_conn:
         mock_cursor = Mock()
-        mock_cursor.fetchall.return_value = [("Accepted", 35.5), ("Rejected", 45.2)]
+        mock_cursor.fetchall.return_value = [("Accepted", 35.5)]
+        mock_cursor.execute = Mock()  # Mock execute to prevent SQL execution
         mock_cursor.__enter__ = Mock(return_value=mock_cursor)
         mock_cursor.__exit__ = Mock(return_value=None)
 
@@ -274,10 +275,10 @@ def test_q12_status_breakdown_fall_2025():
 
         mock_get_conn.return_value = mock_conn
 
-        # WHEN: Getting status breakdown
+        # WHEN: Call the function
         result = q12_status_breakdown_fall_2025()
 
-        # THEN: Should return status percentages
+        # THEN: Should return mocked data and hit line 298
         assert result is not None
 
 
