@@ -1,0 +1,176 @@
+.F....FF...................F..F.
+ERROR: Coverage failure: total of 27 is less than fail-under=100
+                                                                         [100%]
+================================== FAILURES ===================================
+__________________ test_q1_to_q8_and_customs_import_and_run ___________________
+
+    def test_q1_to_q8_and_customs_import_and_run():
+        from src import query_data as q
+>       assert q.q1_count_fall_2025() == 5
+E       AssertionError: assert 3068 == 5
+E        +  where 3068 = <function q1_count_fall_2025 at 0x000002731B9D6020>()
+E        +    where <function q1_count_fall_2025 at 0x000002731B9D6020> = <module 'src.query_data' from 'D:\\Masters\\JHU\\Fall2025\\Python\\jhu_software_concepts\\module_4\\src\\query_data.py'>.q1_count_fall_2025
+
+tests\test_query_data_all.py:65: AssertionError
+_____ TestQueryEdgeCases.test_query_functions_with_null_database_results ______
+
+self = <tests.test_query_data_all.TestQueryEdgeCases object at 0x000002731BE37250>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002731BF6B450>
+
+    @pytest.mark.analysis
+    def test_query_functions_with_null_database_results(self, monkeypatch):
+        """
+        GIVEN: Database returning NULL values
+        WHEN: Query functions expecting single values are called
+        THEN: None or 0 should be returned appropriately
+        """
+        # GIVEN: Mock database returning NULL
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.fetchone.return_value = (None,)
+>       mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_query_data_all.py:652: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Mock name='mock.cursor()' id='2693413747216'>, name = '__enter__'
+
+    def __getattr__(self, name):
+        if name in {'_mock_methods', '_mock_unsafe'}:
+            raise AttributeError(name)
+        elif self._mock_methods is not None:
+            if name not in self._mock_methods or name in _all_magics:
+                raise AttributeError("Mock object has no attribute %r" % name)
+        elif _is_magic(name):
+>           raise AttributeError(name)
+E           AttributeError: __enter__
+
+C:\Users\shrad\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:692: AttributeError
+_________ TestQueryEdgeCases.test_query_functions_handle_zero_results _________
+
+self = <tests.test_query_data_all.TestQueryEdgeCases object at 0x000002731BE37110>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002731BDCEA80>
+
+    @pytest.mark.analysis
+    def test_query_functions_handle_zero_results(self, monkeypatch):
+        """
+        GIVEN: Database functions returning zero/empty results
+        WHEN: Query functions are called
+        THEN: Appropriate default values should be returned
+        """
+        # GIVEN: Mock database returning zeros/empty
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.fetchone.return_value = (0,)
+        mock_cursor.fetchall.return_value = []
+>       mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_query_data_all.py:631: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Mock name='mock.cursor()' id='2693412985824'>, name = '__enter__'
+
+    def __getattr__(self, name):
+        if name in {'_mock_methods', '_mock_unsafe'}:
+            raise AttributeError(name)
+        elif self._mock_methods is not None:
+            if name not in self._mock_methods or name in _all_magics:
+                raise AttributeError("Mock object has no attribute %r" % name)
+        elif _is_magic(name):
+>           raise AttributeError(name)
+E           AttributeError: __enter__
+
+C:\Users\shrad\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:692: AttributeError
+_______ TestConfigurationLoading.test_database_url_from_ini_db_section ________
+
+self = <tests.test_config.TestConfigurationLoading object at 0x000002731BE36AD0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002731BF3E170>
+tmp_path = WindowsPath('C:/Users/shrad/AppData/Local/Temp/pytest-of-shrad/pytest-33/test_database_url_from_ini_db_0')
+
+    def test_database_url_from_ini_db_section(self, monkeypatch, tmp_path):
+        """Test URL construction from INI [db] section"""
+        ini = tmp_path / "config.local.ini"
+        ini.write_text(textwrap.dedent("""\
+            [db]
+            host = localhost
+            port = 5432
+            database = testdb
+            user = alice
+            password = secret123
+        """), encoding="utf-8")
+    
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        import src.config as cfg
+        monkeypatch.setattr(cfg, "_ini_path", lambda fname: ini)
+    
+        cfg = _reload_config()
+        url, source = cfg.database_url_and_source()
+>       assert url == "postgresql://alice:secret123@localhost:5432/testdb"
+E       AssertionError: assert 'postgresql:/...5432/gradcafe' == 'postgresql:/...t:5432/testdb'
+E         
+E         - postgresql://alice:secret123@localhost:5432/testdb
+E         + postgresql://postgres:password@localhost:5432/gradcafe
+
+tests\test_config.py:44: AssertionError
+_______ TestConfigurationLoading.test_database_url_raises_when_missing ________
+
+self = <tests.test_config.TestConfigurationLoading object at 0x000002731BE7C8A0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002731BF64BD0>
+
+    def test_database_url_raises_when_missing(self, monkeypatch):
+        """Test RuntimeError when no config found"""
+        import src.config as cfg
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setattr(cfg, "_ini_path", lambda fname: pathlib.Path("nonexistent.ini"))
+    
+        cfg = _reload_config()
+>       with pytest.raises(RuntimeError, match="No DATABASE_URL"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'RuntimeError'>
+
+tests\test_config.py:54: Failed
+============================== warnings summary ===============================
+tests/test_integration_end_to_end.py::test_pull_then_update_then_render
+tests/test_query_data_all.py::test_q1_to_q8_and_customs_import_and_run
+tests/test_analysis_format.py::test_answer_label_and_percent_two_decimals
+tests/test_flask_page.py::test_root_aliases_to_analysis
+tests/test_flask_page.py::test_analysis_page_loads_and_has_required_elements
+  D:\Masters\JHU\Fall2025\Python\jhu_software_concepts\module_4\.venv\Lib\site-packages\psycopg_pool\pool.py:118: DeprecationWarning: the default for the ConnectionPool 'open' parameter will become 'False' in a future release. Please use open={True|False} explicitly, or use the pool as context manager using: `with ConnectionPool(...) as pool: ...`
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.7-final-0 _______________
+
+Name                                       Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------
+src\__init__.py                                0      0   100%
+src\bo\__init__.py                             0      0   100%
+src\bo\applicant.py                            0      0   100%
+src\config.py                                 40      2    95%   49, 52
+src\dal\__init__.py                            0      0   100%
+src\dal\loader.py                            115    115     0%   15-223
+src\dal\pool.py                               16      0   100%
+src\dal\schema.py                             10     10     0%   7-43
+src\db_check.py                               22     22     0%   11-41
+src\flask_app.py                             135      7    95%   156-157, 165-166, 249-250, 275
+src\load_data.py                              33     33     0%   14-67
+src\module_2_ref\__init__.py                   0      0   100%
+src\module_2_ref\clean.py                     33     33     0%   4-46
+src\module_2_ref\llm_hosting\__init__.py       0      0   100%
+src\module_2_ref\llm_hosting\app.py          152    152     0%   5-358
+src\module_2_ref\run.py                      159    159     0%   24-244
+src\module_2_ref\scrape.py                   193    193     0%   19-292
+src\query_data.py                            112     14    88%   41-46, 221, 302-309
+------------------------------------------------------------------------
+TOTAL                                       1020    740    27%
+FAIL Required test coverage of 100% not reached. Total coverage: 27.45%
+=========================== short test summary info ===========================
+FAILED tests/test_query_data_all.py::test_q1_to_q8_and_customs_import_and_run
+FAILED tests/test_query_data_all.py::TestQueryEdgeCases::test_query_functions_with_null_database_results
+FAILED tests/test_query_data_all.py::TestQueryEdgeCases::test_query_functions_handle_zero_results
+FAILED tests/test_config.py::TestConfigurationLoading::test_database_url_from_ini_db_section
+FAILED tests/test_config.py::TestConfigurationLoading::test_database_url_raises_when_missing
+5 failed, 27 passed, 5 warnings in 2.62s

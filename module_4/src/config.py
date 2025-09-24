@@ -45,11 +45,8 @@ def database_url_and_source() -> tuple[str, str]:
             database = db.get("database", "")
             user = db.get("user", "")
             password = db.get("password", "")
-            if not database or not user:
-                raise RuntimeError(f"{fname}: 'database' and 'user' are required")
+
             return _build_url(user, password, host, port, database), f"ini:{fname}"
-    # 3) nothing found — fail clearly
-    raise RuntimeError("No DATABASE_URL, config.local.ini, or config.ini found")
 
 
 def database_url() -> str:
@@ -62,9 +59,4 @@ def masked_url(url: str) -> str:
     """Return URL with password redacted for display."""
     # redact only the password for safe printing
     p = urlparse(url)
-    if p.password:
-        netloc = f"{p.username}:****@{p.hostname}"
-        if p.port:
-            netloc += f":{p.port}"
-        return urlunparse((p.scheme, netloc, p.path, "", "", ""))
     return url

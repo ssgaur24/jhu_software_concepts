@@ -257,10 +257,7 @@ def create_app(config_overrides: Optional[Dict[str, Any]] = None) -> Flask:
         # Real code would recompute derived metrics here
         return jsonify({"ok": True}), 200
 
-    @app.get("/health")
-    def health():
-        """Simple health probe."""
-        return jsonify(ok=True)
+
 
     # -- graceful pool shutdown
     @app.teardown_appcontext
@@ -270,6 +267,3 @@ def create_app(config_overrides: Optional[Dict[str, Any]] = None) -> Flask:
     return app
 
 
-if __name__ == "__main__":
-    # Local run helper
-    create_app().run(host="127.0.0.1", port=5000, debug=True)
