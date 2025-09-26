@@ -1,66 +1,187 @@
-"""Module-3 loader entry point.
+# -*- coding: utf-8 -*-
+"""
+load_data.py  —  Minimal loader for Module 3
 
-Usage (canonical):
-  python module_3/load_data.py --init \
-    --load module_3/data/module_2llm_extend_applicant_data.json \
-    --batch 2000 --count
+Purpose
+-------
+Read the cleaned JSON produced in Module 2 and load it into a PostgreSQL table
+named 'applicants'.
 
-- --init: create/verify schema (degree TEXT migration included)
-- --load: load JSON array into public.applicants in batches
-- --count: print final row count
+How to run
+----------
+1) Set your database URL (psycopg3 style), for example:
+   Windows (PowerShell):   $env:DATABASE_URL="postgresql://user:pass@localhost:5432/yourdb"
+   macOS/Linux (bash):     export DATABASE_URL="postgresql://user:pass@localhost:5432/yourdb"
+
+2) Place your Module 2 cleaned file at one of these paths OR pass it as an arg:
+   - module_2/llm_extend_applicant_data.json   (typical repo path), or
+   - any path you pass as the first CLI argument.
+
+3) Run:
+   python module_3/load_data.py
+   or
+   python module_3/load_data.py path/to/your_cleaned.json
+
+Notes
+-----
+- This script has been updated to the simpler implementation.
+- Table schema matches the Module 3 assignment columns.
+- The JSON often stores numbers inside strings (e.g., "GPA 3.76"). We extract
+  the numeric part when possible; otherwise we store NULL.
 """
 
 from __future__ import annotations
 
-import argparse
+import json
+import os
+import re
 import sys
-from pathlib import Path
-
-from src.dal.pool import close_pool
-from src.dal.schema import init_schema
-from src.dal.loader import load_json, first_ids
+from typing import Any, Optional
+import configparser
+import psycopg
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI args (student helper)."""
-    p = argparse.ArgumentParser(description="Module-3 data loader")
-    p.add_argument("--init", action="store_true", help="create/verify schema")
-    p.add_argument("--load", type=str, help="path to JSON array from Module-2 (LLM)")
-    p.add_argument("--batch", type=int, default=2000, help="insert batch size (default: 2000)")
-    p.add_argument("--count", action="store_true", help="print final row count")
-    return p.parse_args()
+def _num(text: Any) -> Optional[float]:
+    """
+    Return the first number in a string as float, or None.
 
+    Examples:
+      "GPA 3.76"  -> 3.76
+      "152"       -> 152.0
+      "" / None   -> None
+    """
+    if text is None:
+        return None
+    s = str(text).strip()
+    m = re.search(r"[-+]?\d+(?:\.\d+)?", s)
+    return float(m.group(0)) if m else None
+
+def _read_db_config(path: str = "config.ini") -> dict:
+    """
+    Read PostgreSQL connection settings from config.ini under [db].
+    Returns a dict with keys that psycopg.connect(...) accepts directly.
+    """
+    cfg = configparser.ConfigParser()
+    if not cfg.read(path):
+        print(f"ERROR: Could not read '{path}'. Make sure it exists and has a [db] section.")
+        sys.exit(1)
+
+    if "db" not in cfg:
+        print("ERROR: 'config.ini' is missing the [db] section.")
+        sys.exit(1)
+
+    section = cfg["db"]
+    # Map INI keys to psycopg.connect keyword args
+    return {
+        "host": section.get("host", "localhost"),
+        "port": int(section.get("port", "5432")),
+        "dbname": section.get("database", ""),
+        "user": section.get("user", ""),
+        "password": section.get("password", ""),
+    }
 
 def main() -> None:
-    """Run requested steps: init, load, count."""
-    args = parse_args()
+    # 1) Read database URL
+    db_url = os.getenv("DATABASE_URL", "").strip()
+    if not db_url:
+        print("ERROR: DATABASE_URL is not set.")
+        print('Example: export DATABASE_URL="postgresql://postgres:pass@localhost:5432/yourdb"')
+        sys.exit(1)
 
-    if args.init:
-        init_schema()
-        print("schema: ensured (degree TEXT)")
+    # 2) Resolve JSON path (default or first CLI arg)
+    json_path = sys.argv[1] if len(sys.argv) > 1 else "data/module2_llm_extend_applicant_data.json"
 
-    if args.load:
-        json_path = Path(args.load)
-        if not json_path.exists():
-            raise SystemExit(f"input not found: {json_path}")
+    # 3) Load JSON rows from file
+    with open(json_path, "r", encoding="utf-8") as f:
+        rows = json.load(f)
 
-        total, inserted, skipped, issue_counts, report_path = load_json(str(json_path), batch=args.batch)
-        samples = first_ids(str(json_path), 3)  # <-- fixed: pass path then k
-        print(
-            f"loaded_records={total} inserted={inserted} skipped={skipped}\n"
-            f"issues={issue_counts} sample_ids={samples}\n"
-            f"report={report_path}"
-        )
+    # 4) Connect and create table if not exists
+    with psycopg.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS public.applicants (
+                    p_id SERIAL PRIMARY KEY,
+                    program TEXT,
+                    comments TEXT,
+                    date_added DATE,
+                    url TEXT,
+                    status TEXT,
+                    term TEXT,
+                    us_or_international TEXT,
+                    gpa REAL,
+                    gre REAL,
+                    gre_v REAL,
+                    gre_aw REAL,
+                    degree TEXT,  -- corrected: degree is TEXT
+                    llm_generated_program TEXT,
+                    llm_generated_university TEXT
+                );
+                """
+            )
 
-    if args.count:
-        # tiny count via SELECT COUNT(*) kept in query_data or schema utils
-        from src.dal.schema import count_rows
-        print(f"row_count={count_rows()}")
+            # 5) Prepare simple insert statement (removed batching)
+            insert_sql = """
+                INSERT INTO public.applicants
+                (program, comments, date_added, url, status, term,
+                 us_or_international, gpa, gre, gre_v, gre_aw, degree,
+                 llm_generated_program, llm_generated_university)
+                VALUES
+                (%s, %s, %s, %s, %s, %s,
+                 %s, %s, %s, %s, %s, %s,
+                 %s, %s);
+            """
+
+            # Expected JSON keys (common from Module 2 cleaned file):
+            # "program", "comments", "date_added", "url", "status", "term",
+            # "US/International", "GPA", "gre", "gre_v", "gre_aw", "Degree",
+            # "llm-generated-program", "llm-generated-university"
+
+            for item in rows:
+                program = item.get("program", "")
+                comments = item.get("comments", "")
+                date_added = item.get("date_added", None)
+                url = item.get("url", "")
+                status = item.get("status", "")
+                term = item.get("term", "")
+                us_intl = item.get("US/International", "")
+
+                gpa = _num(item.get("GPA"))
+                gre = _num(item.get("gre"))
+                gre_v = _num(item.get("gre_v"))
+                gre_aw = _num(item.get("gre_aw"))
+
+                # degree is TEXT (e.g., "Masters", "PhD") — store as-is
+                degree = item.get("Degree", "")
+
+                llm_prog = item.get("llm-generated-program", "")
+                llm_univ = item.get("llm-generated-university", "")
+
+                cur.execute(
+                    insert_sql,
+                    (
+                        program,
+                        comments,
+                        date_added,
+                        url,
+                        status,
+                        term,
+                        us_intl,
+                        gpa,
+                        gre,
+                        gre_v,
+                        gre_aw,
+                        degree,
+                        llm_prog,
+                        llm_univ,
+                    ),
+                )
+
+        # 6) Commit once at the end
+        conn.commit()
+
+    print(f"Loaded {len(rows)} rows into 'applicants' from: {json_path}")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        # always close the pool at exit (student cleanup)
-        close_pool()
+    main()

@@ -1,291 +1,287 @@
-# step 1 — minimal scraper: incremental using existing applicant_data.json
-# gzip, short timeouts, resume, tiny delay; dedup via entry_ur
-
-#Attempting optimizations:
-# Incremental-friendly scraper: extracts a stable record with a correct date_added field.
-# Important: the table's displayed date is the "date added to GradCafe". Store it as date_added.
-# Do not force it into acceptance_date or rejection_date.
-# Incremental-friendly scraper: parses listing pages AND enriches each row by visiting
-# the /result/<id> detail page. Correctly captures:
-#   - date_added  ............ date the entry was posted on GradCafe (listing col 3)
-#   - status ................. from detail "Decision" (fallback: listing heuristic)
-#   - acceptance/rejection ... from detail "Notification on <date>" routed by status
-#   - US/International ....... from detail "Degree's Country of Origin"
-#   - GPA/GRE/GRE V/GRE AW ... from detail <dl> block
-#   - program/university/degree... prefer detail labels, fallback to listing
-#   - comments ............... prefer detail "Notes", fallback to listing quoted text
-
 import re
 import json
 import time
+
+from bs4 import BeautifulSoup, Tag, NavigableString
+from urllib.parse import urljoin, urlsplit, urlunsplit, urlparse
 import urllib3
-from pathlib import Path
-from urllib.parse import urljoin, urlparse
-from datetime import datetime
-from bs4 import BeautifulSoup
+http = urllib3.PoolManager(headers={"User-Agent": "Mozilla/5.0"})
 
-URL = "https://www.thegradcafe.com/survey/"
-TARGET = 30000  # stop when no new rows are found for a page
-HEADERS = {"User-Agent": "Mozilla/5.0", "Accept-Encoding": "gzip, deflate"}
+url_prefix = "https://www.thegradcafe.com/survey/?page="
+target_url = "https://www.thegradcafe.com/survey/"
+results = []
+target_length = 30000
 
-status_pat = re.compile(r"\b(accept\w*|reject\w*|wait[\s-]*list\w*|interview\w*)\b", re.IGNORECASE)
-date_pat = re.compile(
-    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
-    r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?)\s+\d{1,2},\s*\d{4}\b"
-    r"|\b\d{4}-\d{2}-\d{2}\b"
-    r"|\b\d{1,2}/\d{1,2}/\d{4}\b",
-    re.IGNORECASE,
-)
-start_term_pat = re.compile(r"\b(Fall|Spring|Summer|Winter)\s+\d{4}\b", re.IGNORECASE)
-university_pat = re.compile(
-    r"\b([A-Z][A-Za-z.&'\- ]{2,}(?:University|College|Institute|Polytechnic|Tech|State University))\b"
-)
-ID_RE = re.compile(r"/result/(\d+)")
+# ---------- small helpers ----------
 
-# ------------------------- helpers -------------------------
+def fetch(url: str) -> str:
+    r = http.request("GET", url, timeout=urllib3.Timeout(connect=5, read=15))
+    return r.data.decode("utf-8", "ignore")
 
-def _http_get(http, url: str) -> str:
-    r = http.request("GET", url, headers=HEADERS, timeout=urllib3.Timeout(connect=3.0, read=12.0), preload_content=True)
-    return r.data.decode("utf-8", errors="ignore")
+def t(entry: Tag, selector: str) -> str:
+    """Return stripped text for the first match of CSS selector under entry, else empty string."""
+    node = entry.select_one(selector)
+    return node.get_text(strip=True) if node else ""
 
-def _robots_allowed(http, base_url: str, path: str) -> bool:
-    robots_url = urljoin(base_url, "/robots.txt")
-    txt = _http_get(http, robots_url)
-    disallows, in_star = [], False
-    for line in txt.splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"): continue
-        low = s.lower()
-        if low.startswith("user-agent:"):
-            in_star = (s.split(":",1)[1].strip() == "*"); continue
-        if in_star and low.startswith("disallow:"):
-            disallows.append(s.split(":",1)[1].strip())
-    return not any(rule and path.startswith(rule) for rule in disallows)
+def first_tr_sibling_tw(tr: Tag) -> Tag | None:
+    """
+    Return the **immediate next** element-sibling <tr> iff it exists
+    and has class 'tw-border-none' (case-insensitive). Otherwise None.
+    """
+    sib = tr.next_sibling
+    # skip whitespace nodes
+    while sib and isinstance(sib, NavigableString):
+        sib = sib.next_sibling
 
-def _clean(s: str) -> str:
-    return " ".join((s or "").split())
+    # must be a <tr>
+    if not (isinstance(sib, Tag) and sib.name == "tr"):
+        return None
 
-def _to_long_date(token: str) -> str:
-    """Return 'Month DD, YYYY' from various tokens like '14/09/2025', '2025-09-14', 'Sep 14, 2025'."""
-    if not token: return ""
-    t = token.strip()
-    fmts = ["%b %d, %Y", "%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"]
-    # choose dd/mm if first component > 12
-    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", t):
-        a, b, c = t.split("/")
-        if int(a) > 12:
-            fmts = ["%d/%m/%Y", "%m/%d/%Y"] + fmts
-    for f in fmts:
-        try:
-            d = datetime.strptime(t, f)
-            return d.strftime("%B %d, %Y")
-        except Exception:
-            continue
-    return ""
+    # must include class 'tw-border-none' (any casing)
+    classes = sib.get("class") or []
+    if isinstance(classes, str):
+        classes = classes.split()
 
-def _norm_status(s: str) -> str:
-    s = (s or "").lower()
-    if s.startswith("accept"): return "Accepted"
-    if s.startswith("reject"): return "Rejected"
-    if s.startswith("wait"):   return "Wait listed"
-    if s.startswith("interview"): return "Interview"
-    return s.title() if s else ""
+    return sib if any(c.lower() == "tw-border-none" for c in classes) else None
 
-# --------------------- detail page parsing ---------------------
+def has_class(tr: Tag, cls: str) -> bool:
+    """True if tr has the given class among its classes."""
+    classes = tr.get("class", [])
+    return cls in classes if isinstance(classes, list) else classes == cls
 
-def _parse_detail_fields(html: str) -> dict:
-    """Parse <dl> on /result/<id>."""
-    soup = BeautifulSoup(html, "html.parser")
-    out = {
-        "GPA": "", "GRE": "", "GRE V": "", "GRE AW": "",
-        "university": "", "program": "", "degree": "",
-        "notes": "", "us_intl": "", "decision": "", "notification_on": ""
+# ---------- extractors for each row-kind ----------
+
+def extract_first_dataset(entry: Tag) -> dict:
+    """
+    Parent row (<tr> with no class).
+    Expected columns:
+      td1 div>div -> university_name
+      td2 div>span(1) -> program_name, span(2) -> masters_phd
+      td3 -> added_on (we'll keep full text; can post-process to year)
+      td4 div -> parse 'accepted on <date>' / 'rejected on <date>'
+      td5 div dt-1 a-2 -> href (applicant URL)
+    """
+    # td1
+    university_name = t(entry, "td:nth-of-type(1) div > div")
+
+    # td2
+    program_name = t(entry, "td:nth-of-type(2) div > span:nth-of-type(1)")
+    masters_phd  = t(entry, "td:nth-of-type(2) div > span:nth-of-type(2)")
+
+    # td3 (keep raw text; optionally pull year elsewhere)
+    added_on = t(entry, "td:nth-of-type(3)")
+
+    # td4: parse accepted/rejected dates
+    status_text = t(entry, "td:nth-of-type(4) div")
+
+    # td5: href to applicant
+    # inside extract_first_dataset(...)
+    origin = f"{urlparse(target_url).scheme}://{urlparse(target_url).netloc}"
+    a = entry.select_one("td:nth-of-type(5) div dt:nth-of-type(1) > a:nth-of-type(2)")
+
+    # fallback 1: still inside first <dt>, but if there is only one <a>, use it
+    if not a:
+        dt1 = entry.select_one("td:nth-of-type(5) dt:nth-of-type(1)")
+        if dt1:
+            anchors = dt1.select("a")
+            if anchors:
+                a = anchors[min(1, len(anchors) - 1)]  # pick 2nd if exists, else 1st
+
+    # fallback 2: any anchor in td5 that looks like a result link
+    if not a:
+        a = entry.select_one("td:nth-of-type(5) a[href*='/result/']")
+
+    if a and a.has_attr("href"):
+        href = a["href"]
+        abs_url = urljoin(origin, href)  # make absolute
+        parts = urlsplit(abs_url)
+        url_link = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))  # strip ? and #
+    else:
+        url_link = ""  # no link found (leave empty string)
+
+    return {
+        "university_name": university_name,
+        "program_name": program_name,
+        "masters_phd": masters_phd,
+        "added_on": added_on,
+        "status": status_text,
+        "applicant_url": url_link,
     }
-    # main <dl> items
-    for box in soup.select("dl > div"):
-        dt = box.find("dt"); dd = box.find("dd")
-        if not dt or not dd: continue
-        label = _clean(dt.get_text(" ", strip=True))
-        value = _clean(dd.get_text(" ", strip=True))
-        if not value: continue
-        if label == "Institution":
-            out["university"] = value
-        elif label == "Program":
-            out["program"] = value
-        elif label == "Degree Type":
-            out["degree"] = value
-        elif label == "Undergrad GPA":
-            out["GPA"] = value
-        elif label == "Degree's Country of Origin":
-            out["us_intl"] = value
-        elif label == "Decision":
-            out["decision"] = value
-        elif label == "Notification":
-            # e.g., "on 14/09/2025 via Phone"
-            m = date_pat.search(value)
-            out["notification_on"] = _to_long_date(m.group(0)) if m else ""
 
-    # GRE list
-    for li in soup.select("dl li"):
-        label_el = li.find("span", class_=lambda c: c and "tw-font-medium" in c)
-        if not label_el: continue
-        val_els = li.find_all("span")
-        if not val_els: continue
-        label = _clean(label_el.get_text(" ", strip=True)).rstrip(":")
-        value = _clean(val_els[-1].get_text(" ", strip=True))
-        if label == "GRE General":
-            out["GRE"] = value
-        elif label == "GRE Verbal":
-            out["GRE V"] = value
-        elif label == "Analytical Writing":
-            out["GRE AW"] = value
+def extract_second_dataset(entry: Tag | None) -> dict:
+    """
+    Second row (tr2): must have class 'tw-border-none'.
+    Cells:
+      td.div.div(2) -> Semester + Year of program start
+      td.div.div(3) -> International/American
+      td.div.div(4..7) -> any of  'GRE 310', 'GRE V 150', 'GRE AW 3.5', 'GPA 3.62'
+    Return empty dict if entry isn’t a matching tr2.
+    """
+    out = {"term": "", "student_type": "", "gre": "", "gre_v": "", "gre_aw": "", "gpa": ""}
+    if not entry or not has_class(entry, "tw-border-none"):
+        return out
 
-    # Notes
-    notes_dt = soup.find("dt", string=re.compile(r"^Notes$", re.I))
-    if notes_dt:
-        dd = notes_dt.find_next("dd")
-        if dd:
-            out["notes"] = _clean(dd.get_text(" ", strip=True))
+    # Grab all divs inside td>div>div in order
+    divs = entry.select("td > div > div")
+    # Defensive indexing per your position notes
+    out["term"] = divs[1].get_text(strip=True) if len(divs) > 1 else ""
+    out["student_type"] = divs[2].get_text(strip=True) if len(divs) > 2 else ""
+
+    # The remaining slots (4..7) may or may not be present; map by prefix
+    for i in range(3, min(len(divs), 7)):
+        txt = divs[i].get_text(strip=True)
+        if not txt:
+            continue
+        if re.match(r"^GRE\s+[0-9]", txt, re.I):
+            out["gre"] = txt
+        elif re.match(r"^GRE\s*V\b", txt, re.I):
+            out["gre_v"] = txt
+        elif re.match(r"^GRE\s*AW\b", txt, re.I):
+            out["gre_aw"] = txt
+        elif re.match(r"^GPA\b", txt, re.I):
+            out["gpa"] = txt
 
     return out
 
-def _fetch_detail(http, entry_url: str) -> dict:
-    try:
-        html = _http_get(http, entry_url)
-        time.sleep(0.08)  # polite
-        return _parse_detail_fields(html)
-    except Exception:
-        return {}
+def extract_comments(entry: Tag | None) -> str:
+    """
+    Third row (tr3): only if it ALSO has class 'tw-border-none'; else return blank.
+    Content lives under 'td p'.
+    """
+    if not entry or not has_class(entry, "tw-border-none"):
+        return ""
+    p = entry.select_one("td p")
+    return p.get_text(strip=True) if p else ""
 
-# --------------------- listing page parsing ---------------------
+# ---------- main scraper ----------
 
-def _extract_rows_from_html(html: str, page_url: str, seen_urls: set, http) -> list:
-    soup = BeautifulSoup(html, "html.parser")
-    new_rows = []
-    for tr in soup.select("tr"):
-        row_text = tr.get_text(" ", strip=True)
-        if not status_pat.search(row_text):
-            continue
+def scrape_data():
+    """
+    Iterate pages and build a list of result rows by stitching:
+      parent tr (no class) + its next tr (tw-border-none) + optional 3rd tr (tw-border-none for comments).
+    Stop when results reach target_length or pages exhaust.
+    """
+    param_page = 1
+    while len(results) <= target_length:
+        url = url_prefix + str(param_page)
+        html = fetch(url)
+        soup = BeautifulSoup(html, "html.parser")
 
-        prev = tr.find_previous("tr")
-        prev_text = prev.get_text(" ", strip=True) if prev else ""
-        ctx = f"{prev_text} {row_text}".strip()
+        # Only parent rows: <tr> with no 'class' attribute
+        parent_rows = [tr for tr in soup.find_all("tr") if not tr.get("class")]
 
-        # listing heuristics
-        m_status = status_pat.search(row_text)
-        list_status = _norm_status(m_status.group(1)) if m_status else ""
+        if not parent_rows:
+            break  # nothing on this page; stop
 
-        tds = tr.find_all("td")
-        date_added = ""
-        if len(tds) >= 3:
-            raw_date = tds[2].get_text(" ", strip=True)
-            m_added = date_pat.search(raw_date)
-            date_added = m_added.group(0) if m_added else ""
+        for parent in parent_rows:
+            row1 = extract_first_dataset(parent)
 
-        # start term (best-effort)
-        m_term = start_term_pat.search(ctx)
-        start_term = m_term.group(0) if m_term else ""
+            # tr2 (details row) : next element <tr>
+            tr2 = first_tr_sibling_tw(parent)
+            row2 = extract_second_dataset(tr2) if tr2 else {}
 
-        # entry URL
-        a = tr.select_one('a[href^="/result/"]') or (prev.select_one('a[href^="/result/"]') if prev else None)
-        entry_url = urljoin(page_url, a["href"]) if a and a.get("href") else ""
-        if not entry_url or entry_url in seen_urls:
-            continue
+            # tr3 (comments row) : next element <tr> after tr2 (may not exist)
+            tr3 = first_tr_sibling_tw(tr2) if tr2 else None
+            comments = extract_comments(tr3) if tr3 else ""
+            if row1["university_name"] != "":
+                result_row = {
+                    **row1,
+                    **row2,
+                    "comments": comments,
+                }
+                results.append(result_row)
+        time.sleep(0.1) #to prevent throttling
+        param_page += 1
 
-        # rough program/degree from listing (may be replaced by detail)
-        program = degree = university = ""
-        if len(tds) >= 2:
-            mid = tds[1]
-            spans = mid.select("div span")
-            if spans:
-                program = _clean(spans[0].get_text(strip=True))
-                deg_span = mid.select_one("span.tw-text-gray-500")
-                degree = _clean(deg_span.get_text(strip=True)) if deg_span else (_clean(spans[-1].get_text(strip=True)) if len(spans) >= 2 else "")
+def create_scraped_json(payload: list[dict], path: str = "scraped.json"):
+    """Write the scraped list of dicts to JSON file (UTF-8)."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
-        comments = ""
-        q = re.search(r'"([^"]{3,})"', ctx)
-        if q:
-            comments = q.group(1)
+def check_and_save_robots() -> dict:
+    """
+    Download robots.txt for the site hosting `target_url`, save it locally,
+    and check whether crawling `target_url` is allowed for `user_agent`.
 
-        # detail enrich
-        d = _fetch_detail(http, entry_url)
-        status = _norm_status(d.get("decision") or list_status)
-        note_date = d.get("notification_on", "")
+    Returns a small dict: {"robots_url": ..., "saved_to": ..., "allowed": True/False}
+    """
+    user_agent = "Mozilla/5.0"
+    save_path = "robots.txt"
+    origin = f"{urlparse(target_url).scheme}://{urlparse(target_url).netloc}"
+    robots_url = urljoin(origin, "/robots.txt")
 
-        # Route notification date into acceptance/rejection when applicable
-        acceptance_date = note_date if status == "Accepted" else ""
-        rejection_date = note_date if status == "Rejected" else ""
+    r = http.request("GET", robots_url, timeout=urllib3.Timeout(connect=5, read=10))
+    content = r.data.decode("utf-8", "ignore")
 
-        # Final record
-        rec = {
-            "status": status,
-            "date_added": date_added,              # posted-on date (assignment)
-            "acceptance_date": acceptance_date,    # from detail Notification
-            "rejection_date": rejection_date,      # from detail Notification
-            "start_term": start_term,
-            "degree": d.get("degree") or degree,
-            "program": d.get("program") or program,
-            "university": d.get("university") or university,
-            "comments": d.get("notes") or comments,
-            "entry_url": entry_url,
-            "US/International": d.get("us_intl", ""),
-            "GRE": d.get("GRE", ""),
-            "GRE V": d.get("GRE V", ""),
-            "GPA": d.get("GPA", ""),
-            "GRE AW": d.get("GRE AW", ""),
-        }
-        new_rows.append(rec)
-        seen_urls.add(entry_url)
-    return new_rows
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
-# --------------------- main ---------------------
+    # Use robotparser to evaluate (can_fetch ignores UA wildcards unless matched)
+    from urllib import robotparser
+    rp = robotparser.RobotFileParser()
+    rp.parse(content.splitlines())
+    allowed = rp.can_fetch(user_agent, target_url)
 
-def main():
-    http = urllib3.PoolManager()
-    parsed = urlparse(URL)
-    base = f"{parsed.scheme}://{parsed.netloc}"
-    path = parsed.path or "/"
-    if not _robots_allowed(http, base, path):
-        print("robots: not allowed for this path — exiting")
-        return
+    return {"robots_url": robots_url, "saved_to": save_path, "allowed": bool(allowed)}
 
-    out_path = Path(__file__).parent / "applicant_data.json"
-    rows, seen = [], set()
-    if out_path.exists():
-        try:
-            rows = json.loads(out_path.read_text(encoding="utf-8"))
-            for r in rows:
-                if r.get("entry_url"):
-                    seen.add(r["entry_url"])
-            print(f"resume: {len(rows)} records")
-        except Exception:
-            rows, seen = [], set()
 
-    # page 1
-    html = _http_get(http, URL)
-    page_rows = _extract_rows_from_html(html, URL, seen, http)
-    if page_rows:
-        rows.extend(page_rows)
-        out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        print(f"page 1 +{len(page_rows)} total {len(rows)}")
-
-    # subsequent pages
-    page = 2
-    while len(rows) < TARGET:
-        page_url = f"{URL}?page={page}"
-        html = _http_get(http, page_url)
-        before = len(rows)
-        page_rows = _extract_rows_from_html(html, page_url, seen, http)
-        rows.extend(page_rows)
-        added = len(rows) - before
-        out_path.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        print(f"page {page} +{added} total {len(rows)}")
-        if added == 0:
-            break
-        page += 1
-        time.sleep(0.05)
-
-    print(f"saved: {out_path} ({len(rows)} records)")
+# ---------- entrypoint ----------
 
 if __name__ == "__main__":
-    main()
+    robot_output = check_and_save_robots()
+    if robot_output["allowed"]:
+        scrape_data()
+        create_scraped_json(results)
+    else:
+        print(f"Not allowed by robots.txt ({robot_output['robots_url']}).")
+        if robot_output.get("error"):
+            print("Fetch error:", robot_output["error"])
+
+
+#a.	Confirm the robot.txt file permits scraping.
+#b.	Use urllib3 to request data from grad cafe.
+#c.	Use beautifulSoup/regex/string search methods to find admissions data.
+"""
+table >
+tr 1
+    td1.div.div value  = university_name
+
+    td2.div.span 1 = program_name
+    td2.div.span 2 = Masters_phd
+
+    td3 = extract only year added_on value
+    
+    td4.div accepted on date rejected on date
+    td5 .div.dt1.a2 href value has URL Link to applicant
+
+tr 2  has class tw-border-none and is next tr to the parent tr
+    td.div.div1  accepted on date rejected on date  - if tg5 doesnt have data
+    td.div.div2 Semester and year of Program start
+    td.div.div3 International/American student
+    td.div.div 4 5 6 or 7  can have either of these values or none: "GRE 310"   "GRE V 150"  "GRE AW 3.5" "GPA 3.62" , find gre , gre_v, gre_aw, gpa
+
+tr 3  if class = tw-border-none  then 
+        tr.td.p value is comments 
+
+else  its next value
+    
+    
+    ·	The data categories pulled SHALL include:
+o	Program Name
+o	University
+o	Comments (if available)
+o	Date of Information Added to Grad Café
+o	URL link to applicant entry
+o	Applicant Status
+▪	If Accepted: Acceptance Date
+▪	If Rejected: Rejection Date
+o	Semester and Year of Program Start (if available)
+o	International / American Student (if available)
+o	GRE Score (if available)
+o	GRE V Score (if available)
+o	Masters or PhD (if available)
+o	GPA (if available)
+o	GRE AW (if available)
+
+"""
+

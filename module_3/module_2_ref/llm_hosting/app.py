@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Flask + tiny local LLM standardizer with incremental JSONL CLI output."""
+"""Flask + CPU/GPU LLM standardizer with batching and final JSON output."""
 
 from __future__ import annotations
 
@@ -9,32 +9,67 @@ import re
 import sys
 import difflib
 from typing import Any, Dict, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+import time
 
 from flask import Flask, jsonify, request
 from huggingface_hub import hf_hub_download
-from llama_cpp import Llama  # CPU-only by default if N_GPU_LAYERS=0
+from llama_cpp import Llama
 
 app = Flask(__name__)
 
-# ---------------- Model config ----------------
-MODEL_REPO = os.getenv(
-    "MODEL_REPO",
-    "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
-)
-MODEL_FILE = os.getenv(
-    "MODEL_FILE",
-    "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-)
+# ---------------- Auto-detect GPU/CPU Configuration ----------------
+MODEL_REPO = os.getenv("MODEL_REPO", "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF")
+MODEL_FILE = os.getenv("MODEL_FILE", "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
 
-N_THREADS = int(os.getenv("N_THREADS", str(os.cpu_count() or 2)))
+
+# Auto-detect GPU capability
+def detect_gpu_layers():
+    """Auto-detect optimal GPU layers based on available hardware."""
+    gpu_layers = os.getenv("N_GPU_LAYERS")
+    if gpu_layers is not None:
+        return int(gpu_layers)
+
+    try:
+        import subprocess
+        result = subprocess.run(['nvidia-smi'], capture_output=True, timeout=3)
+        if result.returncode == 0:
+            print("GPU detected - using GPU acceleration", file=sys.stderr)
+            return -1  # All layers to GPU
+    except:
+        pass
+
+    print("No GPU detected - using CPU optimization", file=sys.stderr)
+    return 0  # CPU only
+
+
+N_GPU_LAYERS = detect_gpu_layers()
+N_THREADS = int(os.getenv("N_THREADS", str(os.cpu_count() or 4)))
 N_CTX = int(os.getenv("N_CTX", "2048"))
-N_GPU_LAYERS = int(os.getenv("N_GPU_LAYERS", "0"))  # 0 → CPU-only
+
+# CPU/GPU optimized batching
+if N_GPU_LAYERS > 0:
+    # GPU settings
+    N_BATCH = int(os.getenv("N_BATCH", "512"))
+    N_UBATCH = int(os.getenv("N_UBATCH", "256"))
+    MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+else:
+    # CPU optimization - larger batches, more threads
+    N_BATCH = int(os.getenv("N_BATCH", "8"))
+    N_UBATCH = int(os.getenv("N_UBATCH", "8"))
+    MAX_WORKERS = int(os.getenv("MAX_WORKERS", str(min(8, os.cpu_count() or 4))))
 
 CANON_UNIS_PATH = os.getenv("CANON_UNIS_PATH", "canon_universities.txt")
 CANON_PROGS_PATH = os.getenv("CANON_PROGS_PATH", "canon_programs.txt")
 
-# Precompiled, non-greedy JSON object matcher to tolerate chatter around JSON
+# Single model with thread lock
+_LLM: Llama | None = None
+_LLM_LOCK = Lock()
+
+# Precompiled JSON matcher
 JSON_OBJ_RE = re.compile(r"\{.*?\}", re.DOTALL)
+
 
 # ---------------- Canonical lists + abbrev maps ----------------
 def _read_lines(path: str) -> List[str]:
@@ -58,7 +93,6 @@ ABBREV_UNI: Dict[str, str] = {
 COMMON_UNI_FIXES: Dict[str, str] = {
     "McGiill University": "McGill University",
     "Mcgill University": "McGill University",
-    # Normalize 'Of' → 'of'
     "University Of British Columbia": "University of British Columbia",
 }
 
@@ -67,7 +101,7 @@ COMMON_PROG_FIXES: Dict[str, str] = {
     "Info Studies": "Information Studies",
 }
 
-# ---------------- Few-shot prompt ----------------
+# ---------------- Original prompt (unchanged) ----------------
 SYSTEM_PROMPT = (
     "You are a data cleaning assistant. Standardize degree program and university "
     "names.\n\n"
@@ -110,14 +144,18 @@ FEW_SHOTS: List[Tuple[Dict[str, str], Dict[str, str]]] = [
     ),
 ]
 
-_LLM: Llama | None = None
-
 
 def _load_llm() -> Llama:
-    """Download (or reuse) the GGUF file and initialize llama.cpp."""
+    """Load LLM with optimal CPU/GPU configuration."""
     global _LLM
     if _LLM is not None:
         return _LLM
+
+    hardware_type = "GPU" if N_GPU_LAYERS > 0 else "CPU"
+    print(f"Loading model optimized for {hardware_type}...", file=sys.stderr)
+    print(f"  GPU Layers: {N_GPU_LAYERS}", file=sys.stderr)
+    print(f"  Batch Size: {N_BATCH}", file=sys.stderr)
+    print(f"  Workers: {MAX_WORKERS}", file=sys.stderr)
 
     model_path = hf_hub_download(
         repo_id=MODEL_REPO,
@@ -127,18 +165,33 @@ def _load_llm() -> Llama:
         force_filename=MODEL_FILE,
     )
 
-    _LLM = Llama(
-        model_path=model_path,
-        n_ctx=N_CTX,
-        n_threads=N_THREADS,
-        n_gpu_layers=N_GPU_LAYERS,
-        verbose=False,
-    )
+    # Optimized initialization for CPU/GPU
+    llama_args = {
+        "model_path": model_path,
+        "n_ctx": N_CTX,
+        "n_threads": N_THREADS,
+        "n_gpu_layers": N_GPU_LAYERS,
+        "verbose": N_GPU_LAYERS > 0,  # Verbose for GPU to show loading
+    }
+
+    # Add batching parameters if supported
+    try:
+        llama_args.update({
+            "n_batch": N_BATCH,
+            "n_ubatch": N_UBATCH,
+        })
+    except:
+        # Fallback for older llama-cpp-python versions
+        pass
+
+    _LLM = Llama(**llama_args)
+
+    print(f"Model loaded with {hardware_type} optimization!", file=sys.stderr)
     return _LLM
 
 
 def _split_fallback(text: str) -> Tuple[str, str]:
-    """Simple, rules-first parser if the model returns non-JSON."""
+    """Rules-based fallback parser."""
     s = re.sub(r"\s+", " ", (text or "")).strip().strip(",")
     parts = [p.strip() for p in re.split(r",| at | @ ", s) if p.strip()]
     prog = parts[0] if parts else ""
@@ -148,8 +201,8 @@ def _split_fallback(text: str) -> Tuple[str, str]:
     if re.fullmatch(r"(?i)mcg(ill)?(\.)?", uni or ""):
         uni = "McGill University"
     if re.fullmatch(
-        r"(?i)(ubc|u\.?b\.?c\.?|university of british columbia)",
-        uni or "",
+            r"(?i)(ubc|u\.?b\.?c\.?|university of british columbia)",
+            uni or "",
     ):
         uni = "University of British Columbia"
 
@@ -163,7 +216,7 @@ def _split_fallback(text: str) -> Tuple[str, str]:
 
 
 def _best_match(name: str, candidates: List[str], cutoff: float = 0.86) -> str | None:
-    """Fuzzy match via difflib (lightweight, Replit-friendly)."""
+    """Fuzzy match via difflib."""
     if not name or not candidates:
         return None
     matches = difflib.get_close_matches(name, candidates, n=1, cutoff=cutoff)
@@ -206,7 +259,7 @@ def _post_normalize_university(uni: str) -> str:
 
 
 def _call_llm(program_text: str) -> Dict[str, str]:
-    """Query the tiny LLM and return standardized fields."""
+    """Thread-safe LLM call with CPU/GPU optimization."""
     llm = _load_llm()
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -227,12 +280,14 @@ def _call_llm(program_text: str) -> Dict[str, str]:
         }
     )
 
-    out = llm.create_chat_completion(
-        messages=messages,
-        temperature=0.0,
-        max_tokens=128,
-        top_p=1.0,
-    )
+    # Thread-safe model access
+    with _LLM_LOCK:
+        out = llm.create_chat_completion(
+            messages=messages,
+            temperature=0.0,
+            max_tokens=128,
+            top_p=1.0,
+        )
 
     text = (out["choices"][0]["message"]["content"] or "").strip()
     try:
@@ -251,6 +306,15 @@ def _call_llm(program_text: str) -> Dict[str, str]:
     }
 
 
+def _process_single_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a single row for parallel execution."""
+    program_text = (row or {}).get("program") or ""
+    result = _call_llm(program_text)
+    row["llm-generated-program"] = result["standardized_program"]
+    row["llm-generated-university"] = result["standardized_university"]
+    return row
+
+
 def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
     """Accept either a list of rows or {'rows': [...]}."""
     if isinstance(payload, list):
@@ -262,65 +326,120 @@ def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
 
 @app.get("/")
 def health() -> Any:
-    """Simple liveness check."""
-    return jsonify({"ok": True})
+    """Health check with system info."""
+    hardware = "GPU" if N_GPU_LAYERS > 0 else "CPU"
+    return jsonify({
+        "ok": True,
+        "hardware": hardware,
+        "gpu_layers": N_GPU_LAYERS,
+        "batch_size": N_BATCH,
+        "workers": MAX_WORKERS,
+        "model_loaded": _LLM is not None
+    })
 
 
 @app.post("/standardize")
 def standardize() -> Any:
-    """Standardize rows from an HTTP request and return JSON."""
+    """Standardize rows with optimal CPU/GPU parallelization."""
     payload = request.get_json(force=True, silent=True)
     rows = _normalize_input(payload)
 
-    out: List[Dict[str, Any]] = []
-    for row in rows:
-        program_text = (row or {}).get("program") or ""
-        result = _call_llm(program_text)
-        row["llm-generated-program"] = result["standardized_program"]
-        row["llm-generated-university"] = result["standardized_university"]
-        out.append(row)
+    # Optimal parallel processing
+    if MAX_WORKERS > 1 and len(rows) > 1:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            processed_rows = list(executor.map(_process_single_row, rows))
+    else:
+        processed_rows = [_process_single_row(row) for row in rows]
 
-    return jsonify({"rows": out})
+    return jsonify({"rows": processed_rows})
 
 
 def _cli_process_file(
-    in_path: str,
-    out_path: str | None,
-    append: bool,
-    to_stdout: bool,
+        in_path: str,
+        out_path: str | None,
+        append: bool,
+        to_stdout: bool,
 ) -> None:
-    """Process a JSON file and write JSONL incrementally."""
+    """Process JSON file with CPU/GPU optimization and create final JSON output."""
     with open(in_path, "r", encoding="utf-8") as f:
         rows = _normalize_input(json.load(f))
 
-    sink = sys.stdout if to_stdout else None
-    if not to_stdout:
-        out_path = out_path or (in_path + ".jsonl")
-        mode = "a" if append else "w"
-        sink = open(out_path, mode, encoding="utf-8")
+    hardware = "GPU" if N_GPU_LAYERS > 0 else "CPU"
+    print(f"Processing {len(rows):,} rows with {hardware} + {MAX_WORKERS} workers...", file=sys.stderr)
+    start_time = time.time()
 
-    assert sink is not None  # for type-checkers
+    # Setup output streams
+    sink = sys.stdout if to_stdout else None
+    jsonl_path = None
+    if not to_stdout:
+        jsonl_path = out_path or (in_path + ".jsonl")
+        mode = "a" if append else "w"
+        sink = open(jsonl_path, mode, encoding="utf-8")
+
+    assert sink is not None
+
+    # Process in optimized batches
+    batch_size = 100 if N_GPU_LAYERS > 0 else 50  # Larger batches for GPU
+    processed_rows = []
+    processed_count = 0
 
     try:
-        for row in rows:
-            program_text = (row or {}).get("program") or ""
-            result = _call_llm(program_text)
-            row["llm-generated-program"] = result["standardized_program"]
-            row["llm-generated-university"] = result["standardized_university"]
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i + batch_size]
 
-            json.dump(row, sink, ensure_ascii=False)
-            sink.write("\n")
-            sink.flush()
+            # Parallel processing with optimal worker count
+            if MAX_WORKERS > 1:
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    batch_results = list(executor.map(_process_single_row, batch))
+            else:
+                batch_results = [_process_single_row(row) for row in batch]
+
+            # Write JSONL incrementally
+            for row in batch_results:
+                json.dump(row, sink, ensure_ascii=False)
+                sink.write("\n")
+                sink.flush()
+                processed_rows.append(row)
+
+            processed_count += len(batch_results)
+            elapsed = time.time() - start_time
+            rate = processed_count / elapsed if elapsed > 0 else 0
+            progress = (processed_count / len(rows)) * 100
+
+            print(f"Progress: {progress:.1f}% ({processed_count:,}/{len(rows):,}) - {rate:.1f} rows/sec [{hardware}]",
+                  file=sys.stderr)
+
+        elapsed = time.time() - start_time
+        final_rate = len(rows) / elapsed if elapsed > 0 else 0
+        print(f"Completed! {len(rows):,} rows in {elapsed:.1f}s ({final_rate:.1f} rows/sec)",
+              file=sys.stderr)
+
     finally:
         if sink is not sys.stdout:
             sink.close()
+
+    # Create final JSON array output (llm_extend_applicant_data.json)
+    if not to_stdout and processed_rows:
+        final_json_path = "llm_extend_applicant_data.json"
+
+        # Handle case where we're processing from a different directory
+        input_dir = os.path.dirname(os.path.abspath(in_path))
+        final_json_path = os.path.join(input_dir, final_json_path)
+
+        print(f"Creating final JSON output: {final_json_path}", file=sys.stderr)
+        with open(final_json_path, "w", encoding="utf-8") as f:
+            json.dump(processed_rows, f, ensure_ascii=False, indent=2)
+
+        file_size = os.path.getsize(final_json_path)
+        print(f"Final JSON created: {file_size:,} bytes with {len(processed_rows):,} records",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Standardize program/university with a tiny local LLM.",
+        description="CPU/GPU optimized LLM standardizer with batching.",
     )
     parser.add_argument(
         "--file",
@@ -336,7 +455,7 @@ if __name__ == "__main__":
         "--out",
         default=None,
         help="Output path for JSON Lines (ndjson). "
-        "Defaults to <input>.jsonl when --file is set.",
+             "Defaults to <input>.jsonl when --file is set.",
     )
     parser.add_argument(
         "--append",
@@ -352,6 +471,8 @@ if __name__ == "__main__":
 
     if args.serve or args.file is None:
         port = int(os.getenv("PORT", "8000"))
+        hardware = "GPU" if N_GPU_LAYERS > 0 else "CPU"
+        print(f"Starting {hardware}-optimized server on port {port}...", file=sys.stderr)
         app.run(host="0.0.0.0", port=port, debug=False)
     else:
         _cli_process_file(
