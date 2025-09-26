@@ -81,22 +81,23 @@ def _read_db_config(path: str = "config.ini") -> dict:
     }
 
 def main() -> None:
-    # 1) Read database URL
-    db_url = os.getenv("DATABASE_URL", "").strip()
-    if not db_url:
-        print("ERROR: DATABASE_URL is not set.")
-        print('Example: export DATABASE_URL="postgresql://postgres:pass@localhost:5432/yourdb"')
+    # 1) Read Database Connection parameters
+    cfg = _read_db_config("config.ini")
+
+    if not cfg:
+        print("ERROR: DATABASE properties are not set.")
+        print('Check config.ini.')
         sys.exit(1)
 
     # 2) Resolve JSON path (default or first CLI arg)
-    json_path = sys.argv[1] if len(sys.argv) > 1 else "data/module2_llm_extend_applicant_data.json"
+    json_path = sys.argv[1] if len(sys.argv) > 1 else "data/module2llm_extend_applicant_data.json"
 
     # 3) Load JSON rows from file
     with open(json_path, "r", encoding="utf-8") as f:
         rows = json.load(f)
 
     # 4) Connect and create table if not exists
-    with psycopg.connect(db_url) as conn:
+    with psycopg.connect(**cfg) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
