@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Flask + CPU/GPU LLM standardizer with batching and final JSON output."""
+"""Flask + CPU/GPU LLM standardizer with batching and final JSON output.
+
+Added:
+- --only-new / --prev: process only rows not already present in a previous extended output.
+- --stdout-array: write the final combined JSON array to stdout (useful for shell redirection).
+"""
 
 from __future__ import annotations
 
@@ -111,11 +116,11 @@ SYSTEM_PROMPT = (
     "- Split into (program name, university name).\n"
     "- Trim extra spaces and commas.\n"
     '- Expand obvious abbreviations (e.g., "McG" -> "McGill University", '
-    '"UBC" -> "University of British Columbia").\n'
+    '"UBC" -> "University of British Columbia").\n"
     "- Use Title Case for program; use official capitalization for university "
     "names (e.g., \"University of X\").\n"
     '- Ensure correct spelling (e.g., "McGill", not "McGiill").\n'
-    '- If university cannot be inferred, return "Unknown".\n\n'
+    '- If university cannot be inferred, return "Unknown".\n\n"
     "Return JSON ONLY with keys:\n"
     "  standardized_program, standardized_university\n"
 )
@@ -324,6 +329,43 @@ def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+# -------------- NEW: helpers for "only-new" processing --------------
+
+def _row_key(row: Dict[str, Any]) -> str:
+    """Build a simple unique key per record (url + date_added + program)."""
+    url = str((row or {}).get("url", "")).strip()
+    dt  = str((row or {}).get("date_added", "")).strip()
+    prg = str((row or {}).get("program", "")).strip()
+    return f"{url}\t{dt}\t{prg}"
+
+def _load_prev_rows(prev_path: str) -> List[Dict[str, Any]]:
+    """Load previous extended results from JSON array or JSONL."""
+    if not prev_path or not os.path.exists(prev_path):
+        return []
+    try:
+        if prev_path.lower().endswith(".jsonl"):
+            out: List[Dict[str, Any]] = []
+            with open(prev_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    out.append(json.loads(line))
+            return out
+        # JSON array
+        with open(prev_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return _normalize_input(data) or (data if isinstance(data, list) else [])
+    except Exception as e:
+        print(f"WARNING: Failed to read prev file '{prev_path}': {e}", file=sys.stderr)
+        return []
+
+def _filter_only_new(in_rows: List[Dict[str, Any]], prev_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return only records whose key is not present in previous output."""
+    prev_keys = { _row_key(r) for r in (prev_rows or []) }
+    return [r for r in (in_rows or []) if _row_key(r) not in prev_keys]
+
+
 @app.get("/")
 def health() -> Any:
     """Health check with system info."""
@@ -359,16 +401,53 @@ def _cli_process_file(
         out_path: str | None,
         append: bool,
         to_stdout: bool,
+        *,
+        only_new: bool = False,
+        prev_path: str | None = None,
+        stdout_array: bool = False,
 ) -> None:
-    """Process JSON file with CPU/GPU optimization and create final JSON output."""
+    """Process JSON file and create output.
+
+    Modes:
+      - Default: write NDJSON to a file (or stdout if to_stdout), then write final JSON array file.
+      - only_new+prev_path: standardize only unseen rows, then combine prev + new for final JSON.
+      - stdout_array: write the final combined JSON array to stdout (single JSON, not JSONL).
+    """
     with open(in_path, "r", encoding="utf-8") as f:
-        rows = _normalize_input(json.load(f))
+        all_rows = _normalize_input(json.load(f))
+
+    prev_rows: List[Dict[str, Any]] = []
+    rows: List[Dict[str, Any]] = all_rows
+
+    if only_new and prev_path:
+        prev_rows = _load_prev_rows(prev_path)
+        rows = _filter_only_new(all_rows, prev_rows)
 
     hardware = "GPU" if N_GPU_LAYERS > 0 else "CPU"
     print(f"Processing {len(rows):,} rows with {hardware} + {MAX_WORKERS} workers...", file=sys.stderr)
     start_time = time.time()
 
-    # Setup output streams
+    # If user asked for final JSON array on stdout, we buffer in memory.
+    if stdout_array:
+        if rows:
+            # Parallel processing
+            if MAX_WORKERS > 1 and len(rows) > 1:
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    processed_rows = list(executor.map(_process_single_row, rows))
+            else:
+                processed_rows = [_process_single_row(r) for r in rows]
+        else:
+            processed_rows = []
+
+        combined = (prev_rows or []) + processed_rows
+        json.dump(combined, sys.stdout, ensure_ascii=False)
+        sys.stdout.flush()
+
+        elapsed = time.time() - start_time
+        print(f"\nDone. Output {len(combined):,} rows as a JSON array to stdout.", file=sys.stderr)
+        return
+
+    # Setup output streams for NDJSON mode (legacy)
     sink = sys.stdout if to_stdout else None
     jsonl_path = None
     if not to_stdout:
@@ -378,16 +457,15 @@ def _cli_process_file(
 
     assert sink is not None
 
-    # Process in optimized batches
-    batch_size = 100 if N_GPU_LAYERS > 0 else 50  # Larger batches for GPU
-    processed_rows = []
+    # Process in optimized batches (as before)
+    batch_size = 100 if N_GPU_LAYERS > 0 else 50
+    processed_rows: List[Dict[str, Any]] = []
     processed_count = 0
 
     try:
         for i in range(0, len(rows), batch_size):
             batch = rows[i:i + batch_size]
 
-            # Parallel processing with optimal worker count
             if MAX_WORKERS > 1:
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     batch_results = list(executor.map(_process_single_row, batch))
@@ -404,13 +482,13 @@ def _cli_process_file(
             processed_count += len(batch_results)
             elapsed = time.time() - start_time
             rate = processed_count / elapsed if elapsed > 0 else 0
-            progress = (processed_count / len(rows)) * 100
+            progress = (processed_count / len(rows)) * 100 if rows else 100.0
 
             print(f"Progress: {progress:.1f}% ({processed_count:,}/{len(rows):,}) - {rate:.1f} rows/sec [{hardware}]",
                   file=sys.stderr)
 
         elapsed = time.time() - start_time
-        final_rate = len(rows) / elapsed if elapsed > 0 else 0
+        final_rate = (len(rows) / elapsed) if elapsed > 0 else 0
         print(f"Completed! {len(rows):,} rows in {elapsed:.1f}s ({final_rate:.1f} rows/sec)",
               file=sys.stderr)
 
@@ -418,21 +496,20 @@ def _cli_process_file(
         if sink is not sys.stdout:
             sink.close()
 
-    # Create final JSON array output (llm_extend_applicant_data.json)
-    if not to_stdout and processed_rows:
-        final_json_path = "llm_extend_applicant_data.json"
+    # Create final JSON array output (combine prev + new when only_new)
+    combined_rows = (prev_rows or []) + processed_rows
 
-        # Handle case where we're processing from a different directory
-        input_dir = os.path.dirname(os.path.abspath(in_path))
-        final_json_path = os.path.join(input_dir, final_json_path)
+    final_json_path = "llm_extend_applicant_data.json"
+    input_dir = os.path.dirname(os.path.abspath(in_path))
+    final_json_path = os.path.join(input_dir, final_json_path)
 
-        print(f"Creating final JSON output: {final_json_path}", file=sys.stderr)
-        with open(final_json_path, "w", encoding="utf-8") as f:
-            json.dump(processed_rows, f, ensure_ascii=False, indent=2)
+    print(f"Creating final JSON output: {final_json_path}", file=sys.stderr)
+    with open(final_json_path, "w", encoding="utf-8") as f:
+        json.dump(combined_rows, f, ensure_ascii=False, indent=2)
 
-        file_size = os.path.getsize(final_json_path)
-        print(f"Final JSON created: {file_size:,} bytes with {len(processed_rows):,} records",
-              file=sys.stderr)
+    file_size = os.path.getsize(final_json_path)
+    print(f"Final JSON created: {file_size:,} bytes with {len(combined_rows):,} records",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -467,6 +544,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Write JSON Lines to stdout instead of a file.",
     )
+    # -------- NEW CLI flags --------
+    parser.add_argument(
+        "--only-new",
+        action="store_true",
+        help="Process only rows not present in --prev extended JSON (by url+date_added+program key).",
+    )
+    parser.add_argument(
+        "--prev",
+        default=None,
+        help="Path to previous extended JSON (array or .jsonl). Used with --only-new.",
+    )
+    parser.add_argument(
+        "--stdout-array",
+        action="store_true",
+        help="Write the FINAL combined JSON array (not JSONL) to stdout.",
+    )
+
     args = parser.parse_args()
 
     if args.serve or args.file is None:
@@ -480,4 +574,7 @@ if __name__ == "__main__":
             out_path=args.out,
             append=bool(args.append),
             to_stdout=bool(args.stdout),
+            only_new=bool(args.only_new),
+            prev_path=args.prev,
+            stdout_array=bool(args.stdout_array),
         )

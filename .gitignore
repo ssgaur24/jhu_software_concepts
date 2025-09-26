@@ -1,7 +1,7 @@
 # llama.cpp downloads (large, reproducible)
 module_2/llm_hosting/models/
-
-
+module_2/.idea/
+module_2/application_data.jsonl
 module_3/config.local.ini
 
 
