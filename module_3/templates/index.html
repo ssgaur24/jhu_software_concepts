@@ -1,75 +1,113 @@
-{% extends 'base.html' %}
-{% block content %}
-  <h1>{% block title %} Grad School Cafe Data Analysis {% endblock %}</h1>
+{% extends "base.html" %}
+{% block title %}Module 3 — Analysis{% endblock %}
 
-  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+{% block content %}
+  <!--
+    Analysis Page (Bootstrap 5)
+    - Two actions:
+        1) "Pull Data"   -> scrape → clean → standardize (only-new) → load to DB
+        2) "Update Analysis" -> refresh results unless a pull is running
+    - Status area shows success / warning / error messages from the server
+    - Results (Q1–Q12) rendered as simple cards
+  -->
+
+  <!-- Page header with title and top-right actions -->
+  <div class="d-flex align-items-start justify-content-between mb-3">
     <div>
-      <form method="post" action="{{ url_for('pull_data') }}" style="display:inline;" id="pull-form">
-        <button type="submit" id="btn-pull" {% if pull_running %}disabled{% endif %}>Pull Data</button>
-      </form>
-      <div style="font-size:0.9em; color:#444; margin-top:4px;">
-        Fetches new GradCafe entries since last run, standardizes them, and loads into the database.
-      </div>
+      <h1 class="mb-1">Grad Café — Analysis (Q1–Q12)</h1>
+      <p class="note mb-0">
+        <strong>Pull Data</strong> fetches the newest Grad Café posts, standardizes any
+        <em>new</em> rows, and loads them into the database.
+        <br class="d-none d-md-block" />
+        <strong>Update Analysis</strong> refreshes the results below. It does nothing while a pull is running.
+      </p>
     </div>
 
-    <div style="text-align:right;">
-      <form method="post" action="{{ url_for('update_analysis') }}" style="display:inline;" id="update-form">
-        <button type="submit" id="btn-update" {% if pull_running %}disabled{% endif %}>Update Analysis</button>
+    <!-- Action buttons (top-right) -->
+    <div class="page-actions">
+      <!-- Pull Data -->
+      <form action="{{ url_for('pull_data') }}" method="post" class="m-0" role="form">
+        <button type="submit"
+                class="btn btn-primary"
+                data-bs-toggle="tooltip"
+                data-bs-placement="bottom"
+                title="Scrape → clean → standardize new rows → load into DB">
+          {% if pull_running %}
+            <!-- Small visual cue if a pull is in progress -->
+            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+          {% endif %}
+          Pull Data
+        </button>
       </form>
-      <div style="font-size:0.9em; color:#444; margin-top:4px;">
-        Recomputes all answers with the newest rows (disabled while data pull is running).
-      </div>
+
+      <!-- Update Analysis (disabled while a pull is running) -->
+      <form action="{{ url_for('update_analysis') }}" method="post" class="m-0" role="form">
+        <button type="submit"
+                class="btn btn-success"
+                {% if pull_running %}disabled aria-disabled="true" aria-busy="true"{% endif %}
+                data-bs-toggle="tooltip"
+                data-bs-placement="bottom"
+                title="{% if pull_running %}A pull is running — Update will do nothing.{% else %}Recompute and refresh results.{% endif %}">
+          Update Analysis
+        </button>
+      </form>
     </div>
   </div>
 
+  <!-- Status banner: maps server-provided level to Bootstrap alert styles -->
   {% if status_msg %}
-    <style>
-      .alert { margin-top:12px; padding:10px 12px; border-radius:8px; white-space:pre-wrap; }
-      .alert.info { background:#eef5ff; border-left:4px solid #5b9bd5; color:#15395b; }
-      .alert.success { background:#e8f6ee; border-left:4px solid #2e7d32; color:#0f5132; }
-      .alert.error { background:#fdecec; border-left:4px solid #c62828; color:#5c1a1a; }
-      button[disabled]{ opacity:.6; cursor:not-allowed; }
-    </style>
-    <div class="alert {{ status_level|default('info') }}">
-      {{ status_msg }}
+    {% set alert_class = 'alert-secondary' %}
+    {% if status_level == 'success' %}{% set alert_class = 'alert-success' %}{% endif %}
+    {% if status_level == 'error' %}{% set alert_class = 'alert-danger' %}{% endif %}
+    {% if status_level == 'warn' %}{% set alert_class = 'alert-warning' %}{% endif %}
+
+    <div class="alert {{ alert_class }} border d-flex align-items-start" role="alert" style="white-space: pre-wrap;">
+      <div class="me-2">
+        {% if status_level == 'success' %}
+          <span class="badge text-bg-success">Success</span>
+        {% elif status_level == 'error' %}
+          <span class="badge text-bg-danger">Error</span>
+        {% elif status_level == 'warn' %}
+          <span class="badge text-bg-warning text-dark">Note</span>
+        {% else %}
+          <span class="badge text-bg-secondary">Info</span>
+        {% endif %}
+      </div>
+      <div class="flex-grow-1">{{ status_msg }}</div>
     </div>
   {% endif %}
 
-  <h2 style="margin-top:18px;">Analysis</h2>
-  <style>
-    .qa-card { background: #f5f3f3; padding: 16px; margin: 18px 0; border-radius: 6px; }
-    .qa-card h3 { margin: 0 0 8px 0; font-weight: 600; }
-    .qa-card p { margin: 0; font-style: italic; }
-    .foot { margin-top: 24px; font-size: 0.95em; color: #555; }
-  </style>
+  {% if pull_running %}
+    <div class="alert alert-warning py-2">
+      <strong>Heads up:</strong> A data pull is currently running. <em>Update Analysis</em> is temporarily disabled.
+    </div>
+  {% endif %}
 
-  {% for row in rows %}
-    <div class="qa-card"><h3>{{ row[0] }}</h3><p>Answer: {{ row[1] }}</p></div>
-  {% endfor %}
+  <!-- Results: render Q1–Q12 as simple cards -->
+  {% if rows and rows|length > 0 %}
+    <div class="row g-3">
+      {% for q, a in rows %}
+        <div class="col-12 col-md-6">
+          <div class="course">
+            <div class="fw-semibold mb-1">{{ q }}</div>
+            <div>{{ a }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="course">
+      No results yet. Click <strong>Pull Data</strong> to load data, then <strong>Update Analysis</strong>.
+    </div>
+  {% endif %}
+{% endblock %}
 
+{% block extra_js %}
+  <!-- Enable Bootstrap tooltips (optional, nice UX) -->
   <script>
-    const PULL_RUNNING = {{ 'true' if pull_running else 'false' }};
-    (function () {
-      function disableAll() {
-        var pull = document.getElementById('btn-pull');
-        var upd  = document.getElementById('btn-update');
-        if (pull) { pull.disabled = true; pull.textContent = 'Pulling…'; }
-        if (upd)  { upd.disabled  = true;  upd.textContent  = 'Updating…'; }
-      }
-      function enableAll() {
-        if (!PULL_RUNNING) {
-          var pull = document.getElementById('btn-pull');
-          var upd  = document.getElementById('btn-update');
-          if (pull) { pull.disabled = false; pull.textContent = 'Pull Data'; }
-          if (upd)  { upd.disabled  = false;  upd.textContent  = 'Update Analysis'; }
-        }
-      }
-      var pf = document.getElementById('pull-form');
-      var uf = document.getElementById('update-form');
-      if (pf) pf.addEventListener('submit', disableAll);
-      if (uf) uf.addEventListener('submit', disableAll);
-      window.addEventListener('pageshow', enableAll);
-      document.addEventListener('DOMContentLoaded', enableAll);
-    })();
+    document.addEventListener('DOMContentLoaded', function () {
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      tooltipTriggerList.forEach(function (el) { new bootstrap.Tooltip(el) })
+    });
   </script>
 {% endblock %}

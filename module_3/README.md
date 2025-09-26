@@ -1,36 +1,30 @@
 # Module 3 — SQL Data Analysis
 
-## Note
-- I am adding some optimizations to practice on the scrape feedback, please feel free to ignore the commits beyond this commit.
-
 ## Approach
-- Create one PostgreSQL table **`applicants`** with the required columns.
-- Provide **`load_data.py`** to initialize the schema and load the Module-2 cleaned JSON.
-- Keep categorical fields as **TEXT**, scores as **REAL**, and the date as **DATE**.
-- Print tiny checks only (counts and first IDs). Use batched inserts for speed.
-- On click of pull data, scrap the data, and clean the new data and insert it in the system.
+- Create one PostgreSQL table **`applicants`** with the required columns (public schema).
+- Use **`load_data.py`** to create the table (if needed) and load the Module-2 extended JSON.
+- Use **`app.py`** (Flask) to add two buttons: **Pull Data** (scrape → clean → standardize new rows → load) and **Update Analysis** (refresh results unless a pull is running).
+- Centralize the analytics in **`query_data.py`** and reuse them in both CLI and the web page.
+- Read database settings from **`config.ini`** under `[db]`.
 
 ## Structure
 ~~~
 module_3/
-  config.ini
+  app.py
   load_data.py
-  db_check.py
+  query_data.py
+  config.ini
   requirements.txt
-  src/
-    config.py
-    dal/
-      pool.py
-      schema.py
-      loader.py
-  module_2_ref
+  templates/
+    base.html
+    index.html
   data/
-    module_2llm_extend_applicant_data.json
-  screenshots/
-    <images>
-  limitations.pdf
-  artifacts/
-    load_report.json
+    module2_llm_extend_applicant_data.json
+module_2/
+  scrape.py
+  clean.py
+  llm_hosting/
+    app.py
 ~~~
 
 ## Setup (Windows / Python 3.13)
@@ -39,85 +33,96 @@ python -m venv .venv
 . .venv/Scripts/Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r module_3/requirements.txt
-python -m pip install -r module_3/module_2_ref/requirements.txt
+python -m pip install -r module_2/requirements.txt
+python -m pip install -r module_2/llm_hosting/requirements.txt
 ~~~
 
 ## Steps to install the LLM module dependencies
 ~~~bash
-cd module_3
-py -3.13 -m venv "../.venv" && "../.venv\Scripts\python" -m pip install -U pip wheel setuptools && "../.venv\Scripts\python" -m pip install --prefer-binary --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -r "module_2_ref\llm_hosting/requirements.txt"
+# Standard install
+python -m pip install -r module_2/llm_hosting/requirements.txt
+
+# Optional (CPU wheel index for llama-cpp on Windows):
+py -3.13 -m venv ".venv" && ".venv\Scripts\python" -m pip install -U pip wheel setuptools && ^
+".venv\Scripts\python" -m pip install --prefer-binary --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu -r "module_2\llm_hosting\requirements.txt"
 ~~~
 
 ## Database config
-- Edit `module_3/config.ini`. If `DATABASE_URL` environment variable is present, it overrides `config.ini`.
+- Edit **`module_3/config.ini`**:
+~~~
+[db]
+host = localhost
+port = 5432
+database = gradcafe
+user = postgres
+password = password
+~~~
+- Scripts read from `config.ini` directly.
 
-## Load data (fast; tiny checks)
+## Load data 
 ~~~bash
-python module_3/load_data.py --init \
-  --load module_3/data/module_2llm_extend_applicant_data.json \
-  --batch 2000 --count
+# Use default path expected by load_data.py
+python module_3/load_data.py
+
+# Or pass a specific JSON
+python module_3/load_data.py module_3/data/module2_llm_extend_applicant_data.json
 ~~~
 
 ## Part B: Run UI
 ~~~bash
-python app.py
+python module_3/app.py
 ~~~
 
-## Verify database and table visibility
+## Verify database / quick check
 ~~~bash
-python module_3/db_check.py
-# prints:
-# config_source=ini:config.ini   (or env:DATABASE_URL)
-# url=postgresql://user:****@localhost:5432/gradcafe
-# db=gradcafe user=... schema=public
-# applicants_exists=true rows=28596
+# Print Q1–Q12 to console (same queries as UI)
+python module_3/query_data.py
+
+# Check row count (example with psql)
+# psql -d gradcafe -c "SELECT COUNT(*) FROM public.applicants;"
 ~~~
 
 ## Data mapping
 - `status` → status (TEXT)  
-- `acceptance_date` / `rejection_date` / `date_added` → date_added (DATE)  
-- `start_term` → term (TEXT)  
-- `degree` → degree (TEXT)  -- Corrected readme with correct schema detail
-- `program` + `university` → program (TEXT; `"University - Program"` if both)  
+- `date_added` → date_added (DATE)  
+- `term` → term (TEXT)  
+- `degree` → degree (TEXT)  
+- `program` → program (TEXT)  
 - `comments` → comments (TEXT)  
-- `entry_url` → url (TEXT) and `p_id` (digits after `/result/<id>`)  
+- `url` → url (TEXT)  
 - `US/International` → us_or_international (TEXT)  
-- `GPA`, `GRE`, `GRE V`, `GRE AW` → gpa/gre/gre_v/gre_aw (REAL)  
+- `GPA`, `gre`, `gre_v`, `gre_aw` → gpa / gre / gre_v / gre_aw (REAL; numeric part extracted when present)  
 - `llm-generated-program` → llm_generated_program (TEXT)  
 - `llm-generated-university` → llm_generated_university (TEXT)
 
-Records without a stable id are skipped and reported.
-
-## Run results (current dataset)
+## Example loader output
 ~~~text
-loaded_records=30012 inserted=28596 skipped=1416 issues={'missing_p_id': 1416, 'date_parse_fail': 0, 'gpa_non_numeric': 0, 'gre_non_numeric': 0, 'gre_v_non_numeric': 0, 'gre_aw_non_numeric': 0, 'degree_non_numeric': 28596} sample_ids=[787144, 787145, 787146]
+Loaded 1234 rows into 'applicants' from: module_3/data/module2_llm_extend_applicant_data.json
 ~~~
 
-- **`p_id`**: Add validation; log skipped rows to CSV.
-- **`degree` textual**: keep `degree` as REAL; map text to numeric in Module-2 or use SQL CASE; NULLs are audited.
-- **Auditing**: `module_3/artifacts/load_report.json` keeps counts and sample ids.
-- **Sparse GPA/GRE**: expect NA where fields are absent. Document in limitations.pdf. 
-- **DB GUI visibility**: table is created as **public.applicants**; DBeaver may need **Invalidate/Reconnect** and schema selection. I also added schema qualification in all SQL to avoid ambiguity.
-- **Pool worker threads**: fixed by close_pool() and atexit.
-- **Module_2 use** : Using the module_2 files directly from the module_2 folder. New files will need to be created in module_2 to support API support.
-- **Pulled Data log**: Add proper logging on UI to show how many new records were pulled.
-- **Analysis Button**: Proper logging on UI to show which all analysis were impacted by new data pull.
-- **Look and feel**: Improve UI look and feel and to show proper messages in popup/alerts.
-
-## Issues encountered (and fixes)
-- pip resolver conflicts on Windows / Python 3.13 → pin psycopg 3.2.x and install in `.venv`.
-- PyCharm interpreter selection → attach `.venv\Scripts\python.exe` in project and run config.
-- Pool worker threads not stopping → explicit `close_pool()` and `atexit`.
-- File path mistakes → track `module_3/data/` and use real paths.
-- Config precedence → `DATABASE_URL` overrides `config.ini` if present.
-- JSON loading speed (≈30k rows) → batched inserts in a single transaction.
-- Data formatting quirks → numeric coercion with NULL fallback, robust date parsing, skip rows without id.
-
 ## Part B — Webpage Buttons (Pull Data & Update Analysis)
+- **Pull Data** pipeline:
+1) `module_2/scrape.py`
+2) `module_2/clean.py`
+3) `module_2/llm_hosting/app.py --file module_2/applicant_data.json`  
+   - If a previous extended file exists at `module_3/data/module2_llm_extend_applicant_data.json`, the app passes `--only-new --prev <that file>` to standardize only new rows.
+4) Save the LLM’s JSON stdout to `module_3/data/module2_llm_extend_applicant_data.json`
+5) `module_3/load_data.py module_3/data/module2_llm_extend_applicant_data.json`
+- A small lock file **`module_3/pull.lock`** prevents overlapping pulls.
+- **Update Analysis**:
+- Recomputes and refreshes Q1–Q12 from the database.
+- Does nothing while a pull is running; the page shows a notice.
 
-- **Pull Data**: Fetches only *new* entries from GradCafe (incremental), cleans/deduplicates them, runs the instructor’s LLM standardizer to populate `llm-generated-university` / `llm-generated-program`, and
-- **loads the updated JSON into Postgres**. A small lock (`module_3/artifacts/pull.lock`) prevents overlapping pulls.
-- **Update Analysis**: Recomputes all on-page answers using the current database. If a pull is running, this button is disabled and does nothing (the page shows a notice).
-- Dependencies for the scraper (`urllib3`, `beautifulsoup4`) are installed automatically the first time **Pull Data** runs, based on `module_3/module_2_ref/requirements.txt`.
-- **Note:** Numbers (and even which questions have data) may vary by dataset and run; the page reflects the latest rows successfully loaded.
+## Notes
+- UI is styled with **Bootstrap 5** (CDN) via `templates/base.html`.
+- All SQL uses **parameterized** statements.
+- SQL filters use simple `ILIKE` patterns for terms, universities, and programs.
 
+## Known issues / bugs
+- **Lock file leftovers**: If the server stops while pulling data, `module_3/pull.lock` may remain and block actions; delete the file to clear the state.
+- **First-run LLM download**: `llm_hosting/app.py` may download a large model on first run; this can take time and requires network access.
+- **CPU performance**: The LLM step can be slow on CPU-only environments; verify that requirements install correctly for your platform.
+- **Path expectations**: The app builds paths relative to the repo layout shown above; different layouts may require updating `app.py` path joins.
+- **Corrupted previous JSON**: If the previous extended file is malformed, the `--only-new --prev` step will fail; remove or fix the previous JSON and rerun.
+- **Date values**: `date_added` must be a valid date string; invalid values will fail insertion.
+- **Network/CDN**: Bootstrap assets load from a CDN; a restricted network will render the page unstyled unless you bundle CSS locally.

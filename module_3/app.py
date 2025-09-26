@@ -51,7 +51,7 @@ def clear_pull_lock() -> None:
         pass
 
 
-# ---- tiny subprocess helper (beginner-friendly) ----
+# ---- tiny subprocess helper ----
 def _run(cmd: list[str], cwd: str) -> tuple[int, str]:
     """
     Run a subprocess and return (rc, tail_of_stdout).
@@ -173,3 +173,8 @@ def update_analysis():
 @app.route("/health")
 def health():
     return {"ok": True, "pull_running": is_pull_running()}
+
+if __name__ == "__main__":
+    # Starts the Flask dev server on http://127.0.0.1:5000/
+    # Change host/port if needed (e.g., host="0.0.0.0", port=5057)
+    app.run(host="127.0.0.1", port=5000, debug=False)
