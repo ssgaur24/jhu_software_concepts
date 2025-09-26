@@ -5,10 +5,6 @@ query_data.py — Q&A text for the Analysis page (and CLI)
 - Reads DB settings from config.ini [db]
 - get_rows(): returns [(question, answer), ...] used by Flask UI
 - CLI usage: python module_3/query_data.py  -> prints the same Q&A
-
-Notes
------
-- Targets "Fall 2024" (adjust _TERM_SEASON / _TERM_YEAR to change).
 """
 
 from __future__ import annotations
@@ -20,6 +16,9 @@ import psycopg
 
 
 def _read_db_config(path: str = "config.ini") -> dict:
+    """
+    Reads database configuration details from config.ini
+    """
     cfg = configparser.ConfigParser()
     if not cfg.read(path) or "db" not in cfg:
         print("ERROR: config.ini with [db] is required.")
@@ -35,6 +34,9 @@ def _read_db_config(path: str = "config.ini") -> dict:
 
 
 def _one_value(cur, sql: str) -> float | int | str | None:
+    """
+    Execute query given in input and return the result
+    """
     cur.execute(sql)
     row = cur.fetchone()
     return row[0] if row else None
@@ -308,9 +310,9 @@ def get_rows() -> List[Tuple[str, str]]:
 
         return rows_out
 
-        def main() -> None:
-            for q, a in get_rows():
-                print(f"- {q}\n  {a}")
+def main() -> None:
+    for q, a in get_rows():
+        print(f"- {q}\n  {a}")
 
-        if __name__ == "__main__":
-            main()
+if __name__ == "__main__":
+    main()

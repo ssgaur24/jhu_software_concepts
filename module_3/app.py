@@ -52,14 +52,20 @@ def clear_pull_lock() -> None:
 
 
 # ---- tiny subprocess helper ----
-def _run(cmd: list[str], cwd: str) -> tuple[int, str]:
+def _run(cmd: list[str], cwd: str, env: dict | None = None) -> tuple[int, str]:
     """
-    Run a subprocess and return (rc, tail_of_stdout).
-    We capture output so the UI can show a short note.
+    Run a subprocess and return (rc, tail_of_stdout_and_stderr).
+    We include stderr so failures are visible in the UI.
     """
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8")
-    tail = (p.stdout or "")[-300:]
+    p = subprocess.run(
+        cmd, cwd=cwd, env=env,
+        capture_output=True, text=True, encoding="utf-8", shell=False
+    )
+    out = p.stdout or ""
+    err = p.stderr or ""
+    tail = (out + ("\n" if out and err else "") + err)[-800:]
     return p.returncode, tail
+
 
 
 # ------------------------------- routes ---------------------------------------
@@ -91,62 +97,70 @@ def pull_data():
 
     start_pull_lock()
     try:
-        here = os.path.dirname(__file__)                  # .../module_3
-        repo = os.path.abspath(os.path.join(here, ".."))  # repo root
+        here = os.path.dirname(__file__)  # .../module_3
+        repo = os.path.abspath(os.path.join(here, ".."))
+        mod2_dir = os.path.join(repo, "module_2")
+        llm_dir = os.path.join(mod2_dir, "llm_hosting")
 
-        # 1) SCRAPE
-        scrape_py = os.path.join(repo, "module_2", "scrape.py")
+        # Make local imports inside module_2 work even if they do "import x" relative to repo
+        env = os.environ.copy()
+        env["PYTHONPATH"] = repo + os.pathsep + env.get("PYTHONPATH", "")
+
+        # 1) SCRAPE (cwd = module_2)
+        scrape_py = os.path.join(mod2_dir, "scrape.py")
         if os.path.exists(scrape_py):
-            rc, tail = _run([sys.executable, "-u", scrape_py], cwd=here)
+            rc, tail = _run([sys.executable, "-u", "scrape.py"], cwd=mod2_dir, env=env)
             if rc != 0:
                 clear_pull_lock()
                 return redirect(url_for("index", msg=f"Pull step failed in scrape (rc={rc}).\n{tail}", level="error"))
 
-        # 2) CLEAN
-        clean_py = os.path.join(repo, "module_2", "clean.py")
+        # 2) CLEAN (cwd = module_2)
+        clean_py = os.path.join(mod2_dir, "clean.py")
         if os.path.exists(clean_py):
-            rc, tail = _run([sys.executable, "-u", clean_py], cwd=here)
+            rc, tail = _run([sys.executable, "-u", "clean.py"], cwd=mod2_dir, env=env)
             if rc != 0:
                 clear_pull_lock()
                 return redirect(url_for("index", msg=f"Pull step failed in clean (rc={rc}).\n{tail}", level="error"))
 
-        # Paths for LLM standardizer
-        llm_app = os.path.join(repo, "module_2", "llm_hosting", "app.py")
-        applicant_json = os.path.join(repo, "module_2", "applicant_data.json")
+        # Expect Module 2 to write applicant_data.json in module_2/
+        applicant_json = os.path.join(mod2_dir, "applicant_data.json")
+        if not os.path.exists(applicant_json):
+            clear_pull_lock()
+            return redirect(url_for(
+                "index",
+                msg=("Pull failed: module_2/applicant_data.json not found after scrape/clean. "
+                     "Make sure scrape.py/clean.py write to that path (or adjust app.py)."),
+                level="error",
+            ))
 
-        # Output (Module 3 expects/uses this path by default)
+        # 3) LLM standardizer (cwd = module_2/llm_hosting)
+        llm_app = os.path.join(llm_dir, "app.py")
         out_dir = os.path.join(here, "data")
         os.makedirs(out_dir, exist_ok=True)
         extended_json = os.path.join(out_dir, "module2_llm_extend_applicant_data.json")
 
-        # 3) LLM HOSTING — standardize only new data if previous extended exists
-        llm_cmd = [sys.executable, "-u", llm_app, "--file", applicant_json]
-
-        # If you implement --only-new / --prev, use them:
+        llm_cmd = [sys.executable, "-u", "app.py", "--file", os.path.join(mod2_dir, "applicant_data.json")]
         if os.path.exists(extended_json):
             llm_cmd += ["--only-new", "--prev", extended_json]
 
-        # Run llm_hosting and capture stdout (the extended JSON)
-        p = subprocess.run(llm_cmd, cwd=here, capture_output=True, text=True, encoding="utf-8")
+        # run and capture stdout explicitly (we need the JSON body)
+        p = subprocess.run(llm_cmd, cwd=llm_dir, env=env, capture_output=True, text=True, encoding="utf-8")
         if p.returncode != 0:
             clear_pull_lock()
-            tail = (p.stdout or "")[-300:]
-            return redirect(url_for("index", msg=f"LLM step failed (rc={p.returncode}).\n{tail or p.stderr}", level="error"))
+            tail = (p.stdout or "") + ("\n" if p.stdout and p.stderr else "") + (p.stderr or "")
+            tail = tail[-800:]
+            return redirect(url_for("index", msg=f"LLM step failed (rc={p.returncode}).\n{tail}", level="error"))
 
-        # Save stdout to extended_json
-        try:
-            data = p.stdout.strip()
-            # sanity: must be a JSON array/object
-            if not data.startswith("{") and not data.startswith("["):
-                raise ValueError("LLM output is not valid JSON")
-            with open(extended_json, "w", encoding="utf-8") as f:
-                f.write(data)
-        except Exception as e:
+        # Save stdout -> module_3/data/module2_llm_extend_applicant_data.json
+        data = (p.stdout or "").strip()
+        if not data.startswith("{") and not data.startswith("["):
             clear_pull_lock()
-            return redirect(url_for("index", msg=f"Failed to write extended JSON: {e}", level="error"))
+            return redirect(url_for("index", msg="LLM step output is not valid JSON.", level="error"))
+        with open(extended_json, "w", encoding="utf-8") as f:
+            f.write(data)
 
-        # 4) LOAD into DB (explicitly pass the file path)
-        rc, tail = _run([sys.executable, "-u", os.path.join(here, "load_data.py"), extended_json], cwd=here)
+        # 4) LOAD into DB (cwd = module_3; pass explicit file path)
+        rc, tail = _run([sys.executable, "-u", "load_data.py", extended_json], cwd=here, env=env)
         if rc != 0:
             clear_pull_lock()
             return redirect(url_for("index", msg=f"Load step failed (rc={rc}).\n{tail}", level="error"))

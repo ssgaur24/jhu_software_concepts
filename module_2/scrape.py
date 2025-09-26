@@ -190,7 +190,7 @@ def scrape_data():
                     "comments": comments,
                 }
                 results.append(result_row)
-        time.sleep(0.1) #to prevent throttling
+        time.sleep(2) #to prevent throttling
         param_page += 1
 
 def create_scraped_json(payload: list[dict], path: str = "scraped.json"):
