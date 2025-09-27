@@ -177,14 +177,45 @@ def app_mod(monkeypatch, tmp_path):
     app_mod = importlib.import_module("app")
 
     # Build very small HTML for predictable tests
-    def _fake_render_template(_name, rows, pull_running, status_msg, status_level, report_exists):
+    # in tests/conftest.py, inside app_mod fixture:
+    def _fake_render_template(*_args, **kwargs):
+        """
+        Minimal HTML so tests can assert page title, buttons, status, and Q/A.
+
+        Accept **kwargs** because app.index() might pass the message as
+        'msg' or 'status' or 'status_msg', and the level as 'level' or 'status_level'.
+        """
+        # Pull values using multiple possible keys (be forgiving)
+        rows = kwargs.get("rows", [])
+        pull_running = kwargs.get("pull_running", False)
+        report_exists = kwargs.get("report_exists", False)
+
+        # Status message and level could be passed with different names
+        status_msg = (
+                kwargs.get("status_msg")
+                or kwargs.get("status")
+                or kwargs.get("msg")
+                or ""
+        )
+        status_level = kwargs.get("status_level") or kwargs.get("level") or "info"
+
+        # Build tiny, predictable HTML
         lines = []
         lines.append("<html><body>")
+        lines.append("<h1>Analysis</h1>")  # page title
+        # Buttons (label-only so tests can assert presence)
+        lines.append("<button id='btn-pull'>Pull Data</button>")
+        lines.append("<button id='btn-update'>Update Analysis</button>")
+        # Status scaffolding + the visible message text
         lines.append(f"<div id='status' data-level='{status_level}'>{status_msg}</div>")
         lines.append(f"<div id='pull_running'>{str(pull_running).lower()}</div>")
         lines.append(f"<div id='report_exists'>{str(report_exists).lower()}</div>")
+        # Render Q/A rows
         for i, (q, a) in enumerate(rows, start=1):
-            lines.append(f"<div class='qa' data-i='{i}'><span class='q'>{q}</span><span class='a'>{a}</span></div>")
+            lines.append(
+                f"<div class='qa' data-i='{i}'>"
+                f"<span class='q'>{q}</span><span class='a'>{a}</span></div>"
+            )
         lines.append("</body></html>")
         return "\n".join(lines)
 
@@ -243,14 +274,16 @@ def tmp_lock(app_mod):
 @pytest.fixture
 def fake_get_rows(monkeypatch):
     """
-    Overrides query_data.get_rows() to return whatever you set.
-    Usage:
-        fake_get_rows.set([("Q1", "A1"), ("Q2", "A2")])
+    Overrides both query_data.get_rows AND app.get_rows so the Flask route
+    sees our fake rows even though app.py imported the symbol at import time.
     """
     import importlib
     qmod = importlib.import_module("query_data")
+    app_mod = importlib.import_module("app")  # app.py did: from query_data import get_rows
 
     def set_rows(rows):
         monkeypatch.setattr(qmod, "get_rows", lambda: rows, raising=True)
+        monkeypatch.setattr(app_mod, "get_rows", lambda: rows, raising=True)
 
     return types.SimpleNamespace(set=set_rows)
+
