@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-app.py —  Flask UI for Module 3 (scrape → clean → LLM → load)
+app.py -  Flask UI for Module 3 (scrape -> clean -> LLM -> load)
 
 What this does
 --------------
@@ -22,7 +22,6 @@ I pass these flags if the previous extended file exists.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -37,17 +36,20 @@ app = Flask(__name__)
 LOCK_PATH = os.path.join(os.path.dirname(__file__), "pull.lock")
 
 def is_pull_running() -> bool:
+    """Check if a data pull operation is currently running."""
     return os.path.exists(LOCK_PATH)
 
 def start_pull_lock() -> None:
+    """Create a lock file to indicate a pull operation is starting."""
     with open(LOCK_PATH, "w", encoding="utf-8") as f:
         f.write("running")
 
 def clear_pull_lock() -> None:
+    """Remove the pull lock file."""
     try:
         if os.path.exists(LOCK_PATH):
             os.remove(LOCK_PATH)
-    except Exception:
+    except OSError:
         pass
 
 
@@ -59,7 +61,7 @@ def _run(cmd: list[str], cwd: str, env: dict | None = None) -> tuple[int, str]:
     """
     p = subprocess.run(
         cmd, cwd=cwd, env=env,
-        capture_output=True, text=True, encoding="utf-8", shell=False
+        capture_output=True, text=True, encoding="utf-8", shell=False, check=False
     )
     out = p.stdout or ""
     err = p.stderr or ""
@@ -67,11 +69,24 @@ def _run(cmd: list[str], cwd: str, env: dict | None = None) -> tuple[int, str]:
     return p.returncode, tail
 
 
+def _build_environment(repo_path: str) -> dict:
+    """Build environment with PYTHONPATH for subprocess execution."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = repo_path + os.pathsep + env.get("PYTHONPATH", "")
+    return env
+
+
+def _validate_json_output(data: str) -> bool:
+    """Check if string appears to be valid JSON."""
+    data = data.strip()
+    return data.startswith("{") or data.startswith("[")
+
 
 # ------------------------------- routes ---------------------------------------
 
 @app.route("/")
 def index():
+    """Main page showing applicant data and status."""
     rows: List[Tuple[str, str]] = get_rows()
     return render_template(
         "index.html",
@@ -93,7 +108,11 @@ def pull_data():
       module_3/load_data.py module_3/data/module2_llm_extend_applicant_data.json
     """
     if is_pull_running():
-        return redirect(url_for("index", msg="A pull is already running. Please wait.", level="warn"))
+        return redirect(url_for(
+            "index",
+            msg="A pull is already running. Please wait.",
+            level="warn"
+        ))
 
     start_pull_lock()
     try:
@@ -102,9 +121,8 @@ def pull_data():
         mod2_dir = os.path.join(repo, "module_2")
         llm_dir = os.path.join(mod2_dir, "llm_hosting")
 
-        # Make local imports inside module_2 work even if they do "import x" relative to repo
-        env = os.environ.copy()
-        env["PYTHONPATH"] = repo + os.pathsep + env.get("PYTHONPATH", "")
+        # Make local imports inside module_2 work
+        env = _build_environment(repo)
 
         # 1) SCRAPE (cwd = module_2)
         scrape_py = os.path.join(mod2_dir, "scrape.py")
@@ -112,7 +130,11 @@ def pull_data():
             rc, tail = _run([sys.executable, "-u", "scrape.py"], cwd=mod2_dir, env=env)
             if rc != 0:
                 clear_pull_lock()
-                return redirect(url_for("index", msg=f"Pull step failed in scrape (rc={rc}).\n{tail}", level="error"))
+                return redirect(url_for(
+                    "index",
+                    msg=f"Pull step failed in scrape (rc={rc}).\n{tail}",
+                    level="error"
+                ))
 
         # 2) CLEAN (cwd = module_2)
         clean_py = os.path.join(mod2_dir, "clean.py")
@@ -120,72 +142,103 @@ def pull_data():
             rc, tail = _run([sys.executable, "-u", "clean.py"], cwd=mod2_dir, env=env)
             if rc != 0:
                 clear_pull_lock()
-                return redirect(url_for("index", msg=f"Pull step failed in clean (rc={rc}).\n{tail}", level="error"))
+                return redirect(url_for(
+                    "index",
+                    msg=f"Pull step failed in clean (rc={rc}).\n{tail}",
+                    level="error"
+                ))
 
         # Expect Module 2 to write applicant_data.json in module_2/
         applicant_json = os.path.join(mod2_dir, "applicant_data.json")
         if not os.path.exists(applicant_json):
             clear_pull_lock()
-            return redirect(url_for(
-                "index",
-                msg=("Pull failed: module_2/applicant_data.json not found after scrape/clean. "
-                     "Make sure scrape.py/clean.py write to that path (or adjust app.py)."),
-                level="error",
-            ))
+            msg = ("Pull failed: module_2/applicant_data.json not found after scrape/clean. "
+                   "Make sure scrape.py/clean.py write to that path (or adjust app.py).")
+            return redirect(url_for("index", msg=msg, level="error"))
 
         # 3) LLM standardizer (cwd = module_2/llm_hosting)
-        llm_app = os.path.join(llm_dir, "app.py")
         out_dir = os.path.join(here, "data")
         os.makedirs(out_dir, exist_ok=True)
         extended_json = os.path.join(out_dir, "module2_llm_extend_applicant_data.json")
 
-        llm_cmd = [sys.executable, "-u", "app.py", "--file", os.path.join(mod2_dir, "applicant_data.json")]
+        llm_cmd = [
+            sys.executable, "-u", "app.py",
+            "--file", os.path.join(mod2_dir, "applicant_data.json")
+        ]
         if os.path.exists(extended_json):
             llm_cmd += ["--only-new", "--prev", extended_json]
 
         # run and capture stdout explicitly (we need the JSON body)
-        p = subprocess.run(llm_cmd, cwd=llm_dir, env=env, capture_output=True, text=True, encoding="utf-8")
+        p = subprocess.run(
+            llm_cmd, cwd=llm_dir, env=env,
+            capture_output=True, text=True, encoding="utf-8", check=False
+        )
         if p.returncode != 0:
             clear_pull_lock()
             tail = (p.stdout or "") + ("\n" if p.stdout and p.stderr else "") + (p.stderr or "")
             tail = tail[-800:]
-            return redirect(url_for("index", msg=f"LLM step failed (rc={p.returncode}).\n{tail}", level="error"))
+            return redirect(url_for(
+                "index",
+                msg=f"LLM step failed (rc={p.returncode}).\n{tail}",
+                level="error"
+            ))
 
         # Save stdout -> module_3/data/module2_llm_extend_applicant_data.json
         data = (p.stdout or "").strip()
-        if not data.startswith("{") and not data.startswith("["):
+        if not _validate_json_output(data):
             clear_pull_lock()
-            return redirect(url_for("index", msg="LLM step output is not valid JSON.", level="error"))
+            return redirect(url_for(
+                "index",
+                msg="LLM step output is not valid JSON.",
+                level="error"
+            ))
         with open(extended_json, "w", encoding="utf-8") as f:
             f.write(data)
 
         # 4) LOAD into DB (cwd = module_3; pass explicit file path)
-        rc, tail = _run([sys.executable, "-u", "load_data.py", extended_json], cwd=here, env=env)
+        rc, tail = _run(
+            [sys.executable, "-u", "load_data.py", extended_json],
+            cwd=here, env=env
+        )
         if rc != 0:
             clear_pull_lock()
-            return redirect(url_for("index", msg=f"Load step failed (rc={rc}).\n{tail}", level="error"))
+            return redirect(url_for(
+                "index",
+                msg=f"Load step failed (rc={rc}).\n{tail}",
+                level="error"
+            ))
 
         clear_pull_lock()
-        return redirect(url_for("index", msg="Pull complete. New data (if any) added.", level="success"))
+        return redirect(url_for(
+            "index",
+            msg="Pull complete. New data (if any) added.",
+            level="success"
+        ))
 
-    except Exception as e:
+    except OSError as e:
         clear_pull_lock()
         return redirect(url_for("index", msg=f"Pull failed: {e}", level="error"))
 
 
 @app.route("/update-analysis", methods=["POST"])
 def update_analysis():
+    """Update analysis if no pull is running."""
     if is_pull_running():
         return redirect(url_for(
             "index",
             msg="Update ignored: a data pull is currently running. Try again after it finishes.",
             level="warn"
         ))
-    return redirect(url_for("index", msg="Analysis updated with the latest data.", level="success"))
+    return redirect(url_for(
+        "index",
+        msg="Analysis updated with the latest data.",
+        level="success"
+    ))
 
 
 @app.route("/health")
 def health():
+    """Health check endpoint."""
     return {"ok": True, "pull_running": is_pull_running()}
 
 if __name__ == "__main__":
