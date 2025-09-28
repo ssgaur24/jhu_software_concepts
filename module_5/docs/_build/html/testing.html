@@ -1,0 +1,285 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Testing Guide &mdash; Grad Cafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Operational Notes" href="operational.html" />
+    <link rel="prev" title="API Reference" href="api.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            Grad Cafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Testing Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#test-categories-and-markers">Test Categories and Markers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#running-tests">Running Tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#test-fixtures-and-test-doubles">Test Fixtures and Test Doubles</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#expected-selectors">Expected Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#test-coverage-requirements">Test Coverage Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#running-coverage-analysis">Running Coverage Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#troubleshooting-tests">Troubleshooting Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="operational.html">Operational Notes</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Grad Cafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Testing Guide</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/testing.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="testing-guide">
+<h1>Testing Guide<a class="headerlink" href="#testing-guide" title="Link to this heading"></a></h1>
+<p>The Grad Cafe Analytics system includes a comprehensive test suite covering all major functionality. This guide explains how to run tests, understand test categories, and work with test fixtures.</p>
+<section id="test-categories-and-markers">
+<h2>Test Categories and Markers<a class="headerlink" href="#test-categories-and-markers" title="Link to this heading"></a></h2>
+<p>All tests are organized using pytest markers. Each test must be marked with one or more of the following:</p>
+<dl class="simple">
+<dt><strong>&#64;pytest.mark.web</strong></dt><dd><p>Tests for Flask routes, page rendering, and HTML structure validation.</p>
+</dd>
+<dt><strong>&#64;pytest.mark.buttons</strong></dt><dd><p>Tests for interactive button endpoints and busy-state behavior.</p>
+</dd>
+<dt><strong>&#64;pytest.mark.analysis</strong></dt><dd><p>Tests for analysis output formatting, labels, and percentage precision.</p>
+</dd>
+<dt><strong>&#64;pytest.mark.db</strong></dt><dd><p>Tests for database schema operations, inserts, and data integrity.</p>
+</dd>
+<dt><strong>&#64;pytest.mark.integration</strong></dt><dd><p>End-to-end workflow tests covering the complete data pipeline.</p>
+</dd>
+</dl>
+</section>
+<section id="running-tests">
+<h2>Running Tests<a class="headerlink" href="#running-tests" title="Link to this heading"></a></h2>
+<p><strong>Run All Tests</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pytest</span>
+</pre></div>
+</div>
+<p><strong>Run Specific Test Categories</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Web layer tests only</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="n">web</span>
+
+<span class="c1"># Button functionality tests</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="n">buttons</span>
+
+<span class="c1"># Analysis formatting tests</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="n">analysis</span>
+
+<span class="c1"># Database tests</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="n">db</span>
+
+<span class="c1"># Integration tests</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="n">integration</span>
+
+<span class="c1"># Combined categories</span>
+<span class="n">pytest</span> <span class="o">-</span><span class="n">m</span> <span class="s2">&quot;web or buttons&quot;</span>
+</pre></div>
+</div>
+<p><strong>Run with Coverage</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Standard coverage report</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">report</span><span class="o">=</span><span class="n">term</span><span class="o">-</span><span class="n">missing</span>
+
+<span class="c1"># HTML coverage report</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">report</span><span class="o">=</span><span class="n">html</span>
+
+<span class="c1"># Fail if coverage below 100%</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">fail</span><span class="o">-</span><span class="n">under</span><span class="o">=</span><span class="mi">100</span>
+</pre></div>
+</div>
+<p><strong>Run Specific Test Files</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pytest</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_flask_page</span><span class="o">.</span><span class="n">py</span>
+<span class="n">pytest</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_buttons</span><span class="o">.</span><span class="n">py</span>
+<span class="n">pytest</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_analysis_format</span><span class="o">.</span><span class="n">py</span>
+<span class="n">pytest</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_db_insert</span><span class="o">.</span><span class="n">py</span>
+<span class="n">pytest</span> <span class="n">tests</span><span class="o">/</span><span class="n">test_integration_end_to_end</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+</section>
+<section id="test-fixtures-and-test-doubles">
+<h2>Test Fixtures and Test Doubles<a class="headerlink" href="#test-fixtures-and-test-doubles" title="Link to this heading"></a></h2>
+<p><strong>Flask Test Client</strong></p>
+<p>The test suite uses a Flask test client for web testing:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">app</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">create_app</span><span class="p">({</span><span class="s2">&quot;TESTING&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">client</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">app</span><span class="o">.</span><span class="n">test_client</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Database Test Fixtures</strong></p>
+<p>The test suite uses fake database connections to avoid requiring a real PostgreSQL instance during testing:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">_FakeConn</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">store</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">store</span> <span class="o">=</span> <span class="n">store</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">cursor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_FakeCursor</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Mocked External Dependencies</strong></p>
+<p>Tests mock external services like scrapers and subprocess calls:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fake_run</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">SimpleNamespace</span><span class="p">(</span><span class="n">returncode</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">stdout</span><span class="o">=</span><span class="s2">&quot;row_count=5&quot;</span><span class="p">,</span> <span class="n">stderr</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+<span class="n">monkeypatch</span><span class="o">.</span><span class="n">setattr</span><span class="p">(</span><span class="s2">&quot;src.flask_app.subprocess.run&quot;</span><span class="p">,</span> <span class="n">fake_run</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="expected-selectors">
+<h2>Expected Selectors<a class="headerlink" href="#expected-selectors" title="Link to this heading"></a></h2>
+<p>The HTML templates must include these stable selectors for UI testing:</p>
+<p><strong>Pull Data Button</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">button</span> <span class="n">data</span><span class="o">-</span><span class="n">testid</span><span class="o">=</span><span class="s2">&quot;pull-data-btn&quot;</span><span class="o">&gt;</span><span class="n">Pull</span> <span class="n">Data</span><span class="o">&lt;/</span><span class="n">button</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p><strong>Update Analysis Button</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">button</span> <span class="n">data</span><span class="o">-</span><span class="n">testid</span><span class="o">=</span><span class="s2">&quot;update-analysis-btn&quot;</span><span class="o">&gt;</span><span class="n">Update</span> <span class="n">Analysis</span><span class="o">&lt;/</span><span class="n">button</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p><strong>Analysis Items</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">div</span> <span class="n">class</span><span class="o">=</span><span class="s2">&quot;answer-item&quot;</span><span class="o">&gt;</span>
+    <span class="n">Answer</span><span class="p">:</span> <span class="p">[</span><span class="n">analysis</span> <span class="n">result</span><span class="p">]</span>
+<span class="o">&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+</section>
+<section id="test-coverage-requirements">
+<h2>Test Coverage Requirements<a class="headerlink" href="#test-coverage-requirements" title="Link to this heading"></a></h2>
+<p>The test suite must achieve 100% code coverage across all modules in <code class="docutils literal notranslate"><span class="pre">src/</span></code>. Key coverage areas:</p>
+<ul class="simple">
+<li><p><strong>Flask routes</strong>: All endpoints (GET /, GET /analysis, POST /pull-data, POST /update-analysis, GET /health)</p></li>
+<li><p><strong>Database operations</strong>: Schema creation, data insertion, query functions</p></li>
+<li><p><strong>ETL pipeline</strong>: Mocked scraper, cleaner, and loader functions</p></li>
+<li><p><strong>Configuration</strong>: Database URL resolution and connection pooling</p></li>
+<li><p><strong>Error handling</strong>: Failed subprocess calls, database errors, busy-state conflicts</p></li>
+</ul>
+</section>
+<section id="running-coverage-analysis">
+<h2>Running Coverage Analysis<a class="headerlink" href="#running-coverage-analysis" title="Link to this heading"></a></h2>
+<p>Generate detailed coverage reports to identify uncovered code:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Terminal report with missing lines</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">report</span><span class="o">=</span><span class="n">term</span><span class="o">-</span><span class="n">missing</span>
+
+<span class="c1"># HTML report (opens coverage/index.html)</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">report</span><span class="o">=</span><span class="n">html</span>
+
+<span class="c1"># Enforce 100% coverage (fails if below threshold)</span>
+<span class="n">pytest</span> <span class="o">--</span><span class="n">cov</span><span class="o">=</span><span class="n">src</span> <span class="o">--</span><span class="n">cov</span><span class="o">-</span><span class="n">fail</span><span class="o">-</span><span class="n">under</span><span class="o">=</span><span class="mi">100</span>
+</pre></div>
+</div>
+<p><strong>Coverage Output Example</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Name</span>                    <span class="n">Stmts</span>   <span class="n">Miss</span>  <span class="n">Cover</span>   <span class="n">Missing</span>
+<span class="o">-----------------------------------------------------</span>
+<span class="n">src</span><span class="o">/</span><span class="n">config</span><span class="o">.</span><span class="n">py</span>              <span class="mi">45</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">db_check</span><span class="o">.</span><span class="n">py</span>             <span class="mi">25</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">flask_app</span><span class="o">.</span><span class="n">py</span>           <span class="mi">120</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">load_data</span><span class="o">.</span><span class="n">py</span>            <span class="mi">35</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">query_data</span><span class="o">.</span><span class="n">py</span>           <span class="mi">95</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">dal</span><span class="o">/</span><span class="n">loader</span><span class="o">.</span><span class="n">py</span>           <span class="mi">85</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">dal</span><span class="o">/</span><span class="n">pool</span><span class="o">.</span><span class="n">py</span>             <span class="mi">20</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="n">src</span><span class="o">/</span><span class="n">dal</span><span class="o">/</span><span class="n">schema</span><span class="o">.</span><span class="n">py</span>           <span class="mi">30</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+<span class="o">-----------------------------------------------------</span>
+<span class="n">TOTAL</span>                      <span class="mi">455</span>      <span class="mi">0</span>   <span class="mi">100</span><span class="o">%</span>
+</pre></div>
+</div>
+</section>
+<section id="troubleshooting-tests">
+<h2>Troubleshooting Tests<a class="headerlink" href="#troubleshooting-tests" title="Link to this heading"></a></h2>
+<p><strong>Common Issues:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Import Errors</strong>: Ensure <code class="docutils literal notranslate"><span class="pre">src/</span></code> is in Python path</p></li>
+<li><p><strong>Database Connection Errors</strong>: Tests should use fake connections</p></li>
+<li><p><strong>Missing Test Markers</strong>: All tests must be marked with pytest markers</p></li>
+<li><p><strong>Coverage Below 100%</strong>: Add tests for uncovered code paths</p></li>
+<li><p><strong>Flaky Tests</strong>: Avoid sleep() calls; use deterministic state checks</p></li>
+</ol>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="api.html" class="btn btn-neutral float-left" title="API Reference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="operational.html" class="btn btn-neutral float-right" title="Operational Notes" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Shraddha Shree.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

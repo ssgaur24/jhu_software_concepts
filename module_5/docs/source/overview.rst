@@ -1,0 +1,98 @@
+Overview & Setup
+================
+
+System Overview
+---------------
+
+The Grad Cafe Analytics system is a data-driven web application that scrapes, processes, and analyzes graduate school application data from The Grad Cafe website. It provides interactive analysis through a Flask web interface.
+
+Environment Setup
+-----------------
+
+Required Environment Variables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system requires the following environment variable:
+
+**DATABASE_URL**
+  PostgreSQL connection string in the format:
+  ``postgresql://username:password@host:port/database``
+
+Alternative Configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If ``DATABASE_URL`` is not set, the system will look for configuration files in this order:
+
+1. ``module_4/config.local.ini``
+2. ``module_4/config.ini``
+
+Configuration file format::
+
+    [db]
+    host = localhost
+    port = 5432
+    database = your_database
+    user = your_username
+    password = your_password
+
+Installation
+------------
+
+1. **Clone the repository**::
+
+    git clone https://github.com/ssgaur24/jhu_software_concepts.git
+    cd module_4
+
+2. **Install dependencies**::
+
+    pip install -r requirements.txt
+
+3. **Set up the database**::
+
+    # Set your DATABASE_URL environment variable
+    export DATABASE_URL="postgresql://username:password@localhost:5432/database"
+
+    # Initialize the database schema
+    python src/load_data.py --init
+
+4. **Run the application**::
+
+    python src/flask_app.py
+
+5. **Access the application**::
+
+    Open your browser to http://127.0.0.1:5000
+
+Running Tests
+-------------
+
+The system includes a comprehensive test suite. To run tests::
+
+    # Run all tests
+    pytest
+
+    # Run specific test categories
+    pytest -m web
+    pytest -m buttons
+    pytest -m analysis
+    pytest -m db
+    pytest -m integration
+
+    # Run with coverage
+    pytest --cov=src --cov-report=term-missing
+
+Requirements
+------------
+
+Core Dependencies
+~~~~~~~~~~~~~~~~~
+
+- Python 3.8+
+- Flask
+- PostgreSQL
+- psycopg[binary]
+- BeautifulSoup4
+- pytest (for testing)
+- sphinx (for documentation)
+
+See ``requirements.txt`` for complete dependency list.
