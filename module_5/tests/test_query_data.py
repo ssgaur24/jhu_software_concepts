@@ -5,25 +5,32 @@ We avoid a real database by passing tiny fake cursor objects directly.
 This raises coverage on query_data.py without needing complex SQL setups.
 """
 
+import configparser
+import runpy
+import sys
 
-from src.query_data import _one_value, _latest_term_filter
 import pytest
+
 import src.query_data as qd
+from src.query_data import _one_value, _latest_term_filter
+
 
 class _FakeCursorOne:
     """
     Minimal cursor whose fetchone() returns a fixed tuple once.
     Used to test _one_value(cur, sql) returning the first column.
     """
+
     def __init__(self, row):
         self._row = row
         self.executed = []
 
     def execute(self, sql, params=None):
+        """Record SQL execution."""
         self.executed.append((sql, params))
 
     def fetchone(self):
-        # Return the provided row exactly once; then None (like no rows)
+        """Return the provided row exactly once; then None (like no rows)."""
         result, self._row = self._row, None
         return result
 
@@ -36,16 +43,19 @@ class _FakeCursorLatestYear:
     - First call (MAX(date_added) query) -> returns the configured 'year_row'
     - Any further calls -> safe defaults (no crash). We don't rely on them here.
     """
+
     def __init__(self, year_row):
         self._calls = 0
         self._year_row = year_row  # e.g., (2025,) or (None,) or None
         self.executed = []
 
     def execute(self, sql, params=None):
+        """Record SQL execution and increment call count."""
         self.executed.append((sql, params))
         self._calls += 1
 
     def fetchone(self):
+        """Return year row on first call, None thereafter."""
         # First fetch corresponds to the MAX(date_added) query
         if self._calls == 1:
             return self._year_row
@@ -53,6 +63,7 @@ class _FakeCursorLatestYear:
         return None
 
     def fetchall(self):
+        """Return empty list for fetchall calls."""
         # Not used in these focused tests
         return []
 
@@ -63,8 +74,6 @@ def test_one_value_returns_first_column():
     _one_value should execute the SQL and return the first column
     of the first row, or None if there is no row.
     """
-
-
     # Case 1: row exists -> return first column
     cur = _FakeCursorOne((123, "extra"))
     out = _one_value(cur, "SELECT 123, 'x'")
@@ -84,13 +93,12 @@ def test_latest_term_filter_uses_date_added_year_if_present():
     when available, and build a term condition including that year.
     We assert that both 'label' and 'sql_condition' include the year text.
     """
-
     fake_cur = _FakeCursorLatestYear((2025,))
     label, cond = _latest_term_filter(fake_cur)
 
     # Be flexible about exact wording; assert the important parts:
-    assert "2025" in label    # e.g., "Fall 2025" or "2025"
-    assert "2025" in cond     # e.g., "term ILIKE '%2025%'"
+    assert "2025" in label  # e.g., "Fall 2025" or "2025"
+    assert "2025" in cond  # e.g., "term ILIKE '%2025%'"
 
 
 @pytest.mark.db
@@ -98,37 +106,41 @@ def test_latest_term_filter_falls_back_when_no_year(monkeypatch):
     """
     When MAX(year from date_added) is None, function falls back to parsing term text.
     """
-    import src.query_data as qd
-
     # Mock the SQL generation to avoid format string issues
-    real_SQL = qd.sql.SQL
+    real_sql = qd.sql.SQL
 
-    def safe_SQL(s):
-        if isinstance(s, str):
-            s = s.replace(r"\d{2}", r"\d{{2}}")
-        return real_SQL(s)
+    def safe_sql(string_value):
+        """Replace problematic regex patterns to avoid format string issues."""
+        if isinstance(string_value, str):
+            string_value = string_value.replace(r"\d{2}", r"\d{{2}}")
+        return real_sql(string_value)
 
-    monkeypatch.setattr(qd.sql, "SQL", safe_SQL, raising=True)
+    monkeypatch.setattr(qd.sql, "SQL", safe_sql, raising=True)
 
     class _FakeCursorFallback:
+        """Fake cursor that handles multiple fetchone calls for fallback testing."""
+
         def __init__(self):
             self._call_count = 0
 
-        def execute(self, *args, **kwargs):
+        def execute(self, *_args, **_kwargs):
+            """Mock execute method that increments call count."""
             self._call_count += 1
 
         def fetchone(self):
+            """Return None for fallback scenario testing."""
             # First call (date_added query) returns None
             # Second call (term text query) also returns None for fallback
             return (None,) if self._call_count <= 2 else None
 
     fake_cur = _FakeCursorFallback()
-    label, cond = qd._latest_term_filter(fake_cur)
+    label, cond = qd._latest_term_filter(fake_cur)  # pylint: disable=protected-access
 
     # Should fall back to "the entire dataset"
     assert isinstance(label, str) and isinstance(cond, str)
     assert label == "the entire dataset"
     assert cond == "TRUE"
+
 
 # ---------------------------------------------------------------------------
 # Helpers: preload results for the sequence used by get_rows()
@@ -142,18 +154,18 @@ def _preload_q1_to_q8_and_term(fake_cur, *, year=2025, season=("fall", 5)):
     Values are simple but valid so formatting works.
     """
     # Q1..Q8 (fetchone)
-    fake_cur.push_one((10,))               # Q1
-    fake_cur.push_one((37.12,))            # Q2
+    fake_cur.push_one((10,))  # Q1
+    fake_cur.push_one((37.12,))  # Q2
     fake_cur.push_one((3.5, 320.0, 160.0, 4.5))  # Q3: AVG tuple
-    fake_cur.push_one((3.40,))             # Q4
-    fake_cur.push_one((25.55,))            # Q5
-    fake_cur.push_one((3.60,))             # Q6
-    fake_cur.push_one((2,))                # Q7
-    fake_cur.push_one((1,))                # Q8
+    fake_cur.push_one((3.40,))  # Q4
+    fake_cur.push_one((25.55,))  # Q5
+    fake_cur.push_one((3.60,))  # Q6
+    fake_cur.push_one((2,))  # Q7
+    fake_cur.push_one((1,))  # Q8
 
     # latest-term year, then season-with-count
-    fake_cur.push_one((year,))             # year from MAX(date_added)
-    fake_cur.push_one(season)              # ('fall', 5)
+    fake_cur.push_one((year,))  # year from MAX(date_added)
+    fake_cur.push_one(season)  # ('fall', 5)
 
 
 # ---------------------------------------------------------------------------
@@ -167,21 +179,28 @@ def test__read_db_config_config_or_db_missing(monkeypatch, capsys, tmp_path):
     Should print: 'ERROR: config.ini with [db] is required.' and raise SystemExit.
     """
     # 1) unreadable: ConfigParser.read returns []
-    monkeypatch.setattr(configparser.ConfigParser, "read", lambda self, p: [], raising=True)
+    monkeypatch.setattr(configparser.ConfigParser, "read",
+                        lambda self, path: [], raising=True)
     with pytest.raises(SystemExit):
-        qd._read_db_config(str(tmp_path / "missing.ini"))
+        qd._read_db_config(str(tmp_path / "missing.ini"))  # pylint: disable=protected-access
     out = capsys.readouterr().out
     assert "ERROR: config.ini with [db] is required." in out
 
     # 2) file "read", but [db] missing
     class _FakeParser(configparser.ConfigParser):
-        def read(self, path):
-            return [str(path)]
+        """Mock ConfigParser that simulates missing [db] section."""
+
+        def read(self, filenames, encoding=None):  # Match parent signature
+            """Mock read method that returns successful read."""
+            return [str(filenames)]
+
         def __contains__(self, key):
+            """Mock contains method that returns False for [db] section."""
             return False  # no [db]
+
     monkeypatch.setattr(configparser, "ConfigParser", _FakeParser, raising=True)
     with pytest.raises(SystemExit):
-        qd._read_db_config(str(tmp_path / "config.ini"))
+        qd._read_db_config(str(tmp_path / "config.ini"))  # pylint: disable=protected-access
     out2 = capsys.readouterr().out
     assert "ERROR: config.ini with [db] is required." in out2
 
@@ -201,7 +220,7 @@ def test__read_db_config_success(tmp_path):
         "password=secret\n",
         encoding="utf-8",
     )
-    cfg = qd._read_db_config(str(ini))
+    cfg = qd._read_db_config(str(ini))  # pylint: disable=protected-access
     assert cfg["host"] == "localhost"
     assert cfg["port"] == 5432
     assert cfg["dbname"] == "testdb"
@@ -223,13 +242,13 @@ def test__latest_term_filter_if_season(fake_db):
     fake_db.push_one((2025,))
     # ('fall', count>0)
     fake_db.push_one(("fall", 7))
-    label, cond = qd._latest_term_filter(fake_db)
+    label, cond = qd._latest_term_filter(fake_db)  # pylint: disable=protected-access
     assert label == "Fall 2025"
     assert "term ILIKE '%fall%'" in cond and "term ILIKE '%2025%'" in cond
 
 
 # ---------------------------------------------------------------------------
-# get_rows: Q1–Q8 (basic) + then each Q9–Q12 branch covered separately
+# get_rows: Q1—Q8 (basic) + then each Q9—Q12 branch covered separately
 # ---------------------------------------------------------------------------
 
 @pytest.mark.db
@@ -239,7 +258,8 @@ def test_get_rows_q1_to_q8_only(fake_db, monkeypatch):
     just to complete the function (their detailed branches tested below).
     """
     # avoid reading real config; FakeConnection ignores values anyway
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db, year=2025, season=("fall", 5))
 
@@ -252,7 +272,7 @@ def test_get_rows_q1_to_q8_only(fake_db, monkeypatch):
     rows = qd.get_rows()
     assert len(rows) == 12
     # Spot check that the first group formatted cleanly
-    flat_answers = " ".join(a for _, a in rows)
+    flat_answers = " ".join(answer for _, answer in rows)
     assert "Applicant count:" in flat_answers
     assert "Percent International:" in flat_answers
     assert "Average GPA:" in flat_answers
@@ -267,7 +287,8 @@ def test_get_rows_q9_ans(fake_db, monkeypatch):
     """
     Q9 has rows -> builds 'Top 5 by entries — ...' list.
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     # Q9 non-empty
@@ -278,9 +299,9 @@ def test_get_rows_q9_ans(fake_db, monkeypatch):
     fake_db.push_all([])
 
     rows = qd.get_rows()
-    q9_q, q9_a = rows[8]
-    assert "Top 5 by entries" in q9_a
-    assert "1) Uni A — 5" in q9_a
+    _, q9_answer = rows[8]
+    assert "Top 5 by entries" in q9_answer
+    assert "1) Uni A — 5" in q9_answer
 
 
 @pytest.mark.db
@@ -288,7 +309,8 @@ def test_get_rows_q9_no_ans(fake_db, monkeypatch):
     """
     Q9 empty -> 'No entries found for that term'.
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -305,7 +327,8 @@ def test_get_rows_q10_ans(fake_db, monkeypatch):
     """
     Q10 has rows -> builds 'cat — pct% (c/total)' mix string.
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -322,7 +345,8 @@ def test_get_rows_q10_no_ans(fake_db, monkeypatch):
     """
     Q10 empty -> 'No status information recorded for that term.'
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -339,7 +363,8 @@ def test_get_rows_q11_ans(fake_db, monkeypatch):
     """
     Q11 has rows -> builds degree mix string with percentages and totals.
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -357,7 +382,8 @@ def test_get_rows_q11_no_ans(fake_db, monkeypatch):
     """
     Q11 empty -> 'No degree information recorded for that term.'
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -374,7 +400,8 @@ def test_get_rows_q12_ans(fake_db, monkeypatch):
     """
     Q12 has rows -> builds per-university GPA line with 'Avg GPA' and n=.
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -392,7 +419,8 @@ def test_get_rows_q12_no_ans(fake_db, monkeypatch):
     """
     Q12 empty -> 'No GPA data available for that term.'
     """
-    monkeypatch.setattr(qd, "_read_db_config", lambda path="config.ini": {}, raising=True)
+    monkeypatch.setattr(qd, "_read_db_config",
+                        lambda path="config.ini": {}, raising=True)
 
     _preload_q1_to_q8_and_term(fake_db)
     fake_db.push_all([])  # Q9
@@ -413,22 +441,17 @@ def test_main_prints_rows(monkeypatch, capsys):
     """
     query_data.main(): prints '- Q' and 'Answer:' lines for rows returned by get_rows().
     """
-    monkeypatch.setattr(qd, "get_rows", lambda: [("Q1", "Answer: A1"), ("Q2", "Answer: A2")], raising=True)
+    monkeypatch.setattr(qd, "get_rows",
+                        lambda: [("Q1", "Answer: A1"), ("Q2", "Answer: A2")],
+                        raising=True)
     qd.main()
     out = capsys.readouterr().out
     assert "- Q1" in out and "Answer: A1" in out
     assert "- Q2" in out and "Answer: A2" in out
 
 
-# REPLACE your failing test___name___main_guard in tests/test_query_data.py with this:
-
-import configparser
-import runpy
-import sys
-import pytest
-
 @pytest.mark.db
-def test___name___main_guard(monkeypatch, fake_db):
+def test___name___main_guard(monkeypatch):
     """
     Covers the main guard in query_data.py:
         if __name__ == '__main__': main()
@@ -437,14 +460,13 @@ def test___name___main_guard(monkeypatch, fake_db):
     - forcing ConfigParser.read(...) -> [] so _read_db_config exits early,
     - cleaning sys.argv so pytest flags don't get treated as args,
     - expecting SystemExit (which proves the guard invoked main()).
-
-    fake_db is included so psycopg.connect is patched globally if reached.
     """
     # Clean argv for the module being executed
     monkeypatch.setattr(sys, "argv", ["query_data.py"], raising=True)
 
     # Make _read_db_config fail early on the fresh module
-    monkeypatch.setattr(configparser.ConfigParser, "read", lambda self, p: [], raising=True)
+    monkeypatch.setattr(configparser.ConfigParser, "read",
+                        lambda self, path: [], raising=True)
 
     # Execute a fresh copy as __main__ so the guard runs; expect early exit
     with pytest.raises(SystemExit):
