@@ -1,0 +1,189 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grad Cafe Analytics Documentation &mdash; Grad Cafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Overview &amp; Setup" href="overview.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="#" class="icon icon-home">
+            Grad Cafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="testing.html">Testing Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="operational.html">Operational Notes</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">Grad Cafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Grad Cafe Analytics Documentation</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="grad-cafe-analytics-documentation">
+<h1>Grad Cafe Analytics Documentation<a class="headerlink" href="#grad-cafe-analytics-documentation" title="Link to this heading"></a></h1>
+<p>Welcome to the Grad Cafe Analytics system documentation. This is a comprehensive data analysis and web application for processing graduate school application data from The Grad Cafe.</p>
+<p>The system consists of three main components:</p>
+<ul class="simple">
+<li><p><strong>Web Layer</strong>: Flask application serving analysis pages and interactive controls</p></li>
+<li><p><strong>ETL Pipeline</strong>: Data scraping, cleaning, and loading processes</p></li>
+<li><p><strong>Database Layer</strong>: PostgreSQL storage and query operations</p></li>
+</ul>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview &amp; Setup</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="overview.html#system-overview">System Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="overview.html#environment-setup">Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="overview.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="overview.html#running-tests">Running Tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="overview.html#requirements">Requirements</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#system-architecture-overview">System Architecture Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#web-layer-flask">Web Layer (Flask)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#etl-layer-extract-transform-load">ETL Layer (Extract, Transform, Load)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#database-layer">Database Layer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#configuration-management">Configuration Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#testing-architecture">Testing Architecture</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api.html#flask-application-flask-app-py">Flask Application (flask_app.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#data-loading-load-data-py">Data Loading (load_data.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#query-functions-query-data-py">Query Functions (query_data.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#configuration-management-config-py">Configuration Management (config.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#database-check-utilities-db-check-py">Database Check Utilities (db_check.py)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#data-access-layer">Data Access Layer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#etl-modules-module-2-ref">ETL Modules (module_2_ref)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#flask-routes-reference">Flask Routes Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#database-schema">Database Schema</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="testing.html">Testing Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#test-categories-and-markers">Test Categories and Markers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#running-tests">Running Tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#test-fixtures-and-test-doubles">Test Fixtures and Test Doubles</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#expected-selectors">Expected Selectors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#test-coverage-requirements">Test Coverage Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#running-coverage-analysis">Running Coverage Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html#troubleshooting-tests">Troubleshooting Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="operational.html">Operational Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#busy-state-policy">Busy-State Policy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#idempotency-strategy">Idempotency Strategy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#uniqueness-keys">Uniqueness Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#performance-considerations">Performance Considerations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="operational.html#monitoring-and-logging">Monitoring and Logging</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<p>To get started with the Grad Cafe Analytics system:</p>
+<ol class="arabic simple">
+<li><p>Set up your environment variables (see <a class="reference internal" href="overview.html"><span class="doc">Overview &amp; Setup</span></a>)</p></li>
+<li><p>Install dependencies: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-r</span> <span class="pre">requirements.txt</span></code></p></li>
+<li><p>Initialize the database: <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">src/load_data.py</span> <span class="pre">--init</span></code></p></li>
+<li><p>Run the Flask app: <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">src/flask_app.py</span></code></p></li>
+</ol>
+</section>
+</section>
+<section id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h1>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="overview.html" class="btn btn-neutral float-right" title="Overview &amp; Setup" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Shraddha Shree.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

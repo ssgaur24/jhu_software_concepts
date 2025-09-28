@@ -35,7 +35,6 @@ jobs:
     - name: Create Python package structure
       run: |
         touch module_4/src/__init__.py
-        touch module_4/src/dal/__init__.py
         touch module_4/tests/__init__.py
         
     - name: Install dependencies

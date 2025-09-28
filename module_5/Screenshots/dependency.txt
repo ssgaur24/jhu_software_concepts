@@ -1,0 +1,24 @@
+Below is the breakdown of what’s in my app.py dependency graph and how each part is used:
+
+1. app.py (root node) — The Flask entry point that wires routes and the Part-B buttons; it orchestrates reading analysis rows and kicking off pipeline actions.
+
+2. Flask (package node) — Provides Flask, render_template, request, redirect, and url_for; I use it for routing, form handling, and rendering the Analysis page.
+
+3. query_data (local module) — I import get_rows() from here to fetch the analysis tuples (question-answer) so the web layer stays thin and the SQL logic is isolated.
+
+4. subprocess (stdlib) — Used to run the scraper/cleaner/loader as external processes, capturing stdout/stderr so the web thread isn’t blocked by long-running work.
+
+5. os / sys (stdlib) — Used for path resolution, environment/venv interpreter selection, and robust invocation of the right Python executable for the pipeline.
+
+
+6. Arrow direction in the graph: an arrow from A TO B means “A imports B.”, edges point from the importer to the imported module (dependency direction). 
+Missing arrows mean there’s no import relationship. 
+
+7. How that maps to request flow: When a user hits a Flask route in app.py, code is already imported. The route handler then calls functions (e.g., get_rows() from query_data) or launches subprocesses for scrape.py, clean.py, load_data.py. The arrows show that app.py can see query_data because it imports it, but there’s no arrow to the pipeline scripts because they’re spawned, not imported.
+
+8. Transitive dependencies: If app.py -> query_data and query_data -> psycopg, then app.py transitively depends on psycopg. In the diagram, we can see a path reflecting this chain; pydeps may or may not draw a direct shortcut edge.
+
+
+What the graph does not show: Execution order, HTTP call sequencing, or runtime branching. It won’t depict your ETL steps because scrape/clean/load_data are external processes; they’re part of the runtime pipeline flow, not the import graph.
+
+***Finally, note that scrape.py, clean.py, and load_data.py do not appear in the diagram because they’re executed via subprocess (operational dependencies) rather than imported (no import edge, so pydeps omits them).

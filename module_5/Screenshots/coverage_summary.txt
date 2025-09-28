@@ -1,0 +1,12 @@
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+src\__init__.py           0      0   100%
+src\config.py            32      0   100%
+src\dal\__init__.py       0      0   100%
+src\dal\pool.py          16      0   100%
+src\flask_app.py        133      0   100%
+src\load_data.py         48      0   100%
+src\query_data.py       102      0   100%
+---------------------------------------------------
+TOTAL                   331      0   100%

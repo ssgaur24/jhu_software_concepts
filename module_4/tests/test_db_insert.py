@@ -1,442 +1,235 @@
-import pytest
-from types import SimpleNamespace
-from pathlib import Path
-from unittest.mock import Mock, patch
+# module_4/tests/test_db_insert.py
+"""
+Tests for load_data.py (DB insert path) — beginner-friendly and minimal.
+
+Covers:
+- _num() helper (None, success, and no-match cases)
+- _read_db_config() error/success paths
+- main(): config-not-found path and happy path (with fake DB)
+- __main__ guard invoking main() (without actually loading data twice)
+
+All DB calls use the fake psycopg connection from conftest.py (fake_db).
+All filesystem/config access uses tmp paths + monkeypatching where needed.
+"""
+
+import os
+import sys
 import json
+import runpy
+import configparser
+import pytest
+from src.load_data import _num
+from src.load_data import _read_db_config
+import src.load_data as ld
 
 
-class _FakeCursor:
-    def __init__(self, store):
-        self.store = store
-        self._rows = []
-        self.rowcount = 0
+# -----------------------------
+# _num helper
+# -----------------------------
 
-    def execute(self, sql, params=None):
-        sql_low = (sql or "").lower()
-        if sql_low.startswith("select p_id from public.applicants"):
-            self._rows = [(r["p_id"],) for r in self.store["rows"]]
-        elif "insert into public.applicants" in sql_low or "create table" in sql_low:
-            if params and params.get("p_id"):
-                p_id = params["p_id"]
-                if all(r["p_id"] != p_id for r in self.store["rows"]):
-                    self.store["rows"].append({"p_id": p_id})
-                    self.rowcount = 1
-                else:
-                    self.rowcount = 0  # Conflict, no insert
-        elif sql_low.startswith("select count(") or "count(*)" in sql_low:
-            self._rows = [(len(self.store["rows"]),)]
-        else:
-            self._rows = []
+@pytest.mark.db
+def test__num_text_is_none():
+    """
+    _num(None) -> None (gracefully handles missing numeric text).
+    """
 
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return list(self._rows)
-
-    def close(self):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-
-class _FakeConn:
-    def __init__(self, store):
-        self.store = store
-
-    def cursor(self):
-        return _FakeCursor(self.store)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def close(self):
-        pass
-
-    def commit(self):
-        pass
-
-
-@pytest.fixture()
-def fakestore():
-    return {"rows": []}
+    assert _num(None) is None
 
 
 @pytest.mark.db
-def test_insert_and_idempotency(monkeypatch, client, fakestore):
-    """Test database insert on pull and idempotency"""
-    # Use our fake DB connection
-    monkeypatch.setattr("src.dal.pool.get_conn", lambda: _FakeConn(fakestore))
+def test__num_success():
+    """
+    _num should parse the first number and return it as float.
+    """
 
-    # Seed files that /pull-data checks
-    m4_dir = Path(client.application.root_path).parent
-    m2_ref = m4_dir / "module_2_ref"
-    data_dir = m4_dir / "data"
-    m2_ref.mkdir(parents=True, exist_ok=True)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (m2_ref / "applicant_data.json").write_text('[{"p_id": 1, "entry_url": "/result/1"}]', encoding="utf-8")
-    (m2_ref / "llm_extend_applicant_data.json").write_text('[{"p_id": 1}]', encoding="utf-8")
-
-    # Fake pipeline runner - simulate DB insert on load step
-    def fake_run(args, **kwargs):
-        script = ""
-        if isinstance(args, (list, tuple)) and len(args) > 1:
-            script = str(args[1]).replace("\\", "/").lower()
-        if script.endswith("load_data.py"):
-            if not any(r["p_id"] == 1 for r in fakestore["rows"]):
-                fakestore["rows"].append({"p_id": 1})
-            return SimpleNamespace(returncode=0, stdout="row_count=1", stderr="")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
-
-    # First pull inserts one row
-    client.application.config["BUSY"] = False
-    r1 = client.post("/pull-data")
-
-
-
-    # Second pull is idempotent
-    assert 200 == 200
-
+    assert _num("GPA 3.76") == 3.76
+    assert _num("152") == 152.0
+    assert _num(" score: -2.5 ") == -2.5
 
 
 @pytest.mark.db
-def test_load_data_functions(monkeypatch, tmp_path, fakestore):
-    """Test load_data.py functions for coverage"""
-    # Mock database connection
-    monkeypatch.setattr("src.load_data.get_conn", lambda: _FakeConn(fakestore))
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
+def test__num_else_None():
+    """
+    If the text contains no number, _num returns None.
+    """
 
-    from src.load_data import init_schema, load_json, count_rows
+    assert _num("no numbers here") is None
 
-    # Test init_schema
-    init_schema()
 
-    # Test load_json
-    test_data = [{"p_id": 1, "program": "CS", "status": "Accepted", "term": "Fall 2025"}]
-    test_file = tmp_path / "test.json"
-    test_file.write_text(json.dumps(test_data), encoding="utf-8")
-
-    total, inserted, skipped, issues, report = load_json(str(test_file))
-    assert total == 1
-    assert inserted >= 0
-
-    # Test count_rows
-    count = count_rows()
-    assert isinstance(count, int)
-
+# -----------------------------
+# _read_db_config helper
+# -----------------------------
 
 @pytest.mark.db
-def test_load_data_parse_args(monkeypatch):
-    """Test parse_args function"""
-    # Mock sys.argv
-    test_args = ["load_data.py", "--init", "--load", "test.json", "--count"]
-    monkeypatch.setattr("sys.argv", test_args)
+def test__read_db_config_not_cfg_read(monkeypatch, capsys, tmp_path):
+    """
+    When configparser.ConfigParser.read(path) returns [] (file not found or unreadable),
+    function prints an error and sys.exit(1).
+    """
 
-    from src.load_data import parse_args
-    args = parse_args()
-
-    assert args.init is True
-    assert args.load == "test.json"
-    assert args.count is True
-
-
-@pytest.mark.db
-def test_load_data_main_init_only(monkeypatch, capsys):
-    """Test main function with --init flag only"""
-    # Mock sys.argv for init only
-    monkeypatch.setattr("sys.argv", ["load_data.py", "--init"])
-
-    # Mock functions
-    init_called = []
-
-    def mock_init():
-        init_called.append(True)
-
-    monkeypatch.setattr("src.load_data.init_schema", mock_init)
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
-
-    from src.load_data import main
-    main()
-
-    captured = capsys.readouterr()
-    assert "schema: ensured" in captured.out
-    assert len(init_called) == 1
-
-
-@pytest.mark.db
-def test_load_data_main_file_not_found(monkeypatch):
-    """Test main function with non-existent file"""
-    monkeypatch.setattr("sys.argv", ["load_data.py", "--load", "nonexistent.json"])
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
-
-    from src.load_data import main
+    # Monkeypatch the ConfigParser.read method to always return []
+    monkeypatch.setattr(configparser.ConfigParser, "read", lambda self, p: [], raising=True)
 
     with pytest.raises(SystemExit):
-        main()
+        _read_db_config(str(tmp_path / "missing.ini"))
 
-
-@pytest.mark.buttons
-def test_pull_data_llm_step_size_check_fails(monkeypatch, client):
-    """Test pull-data when LLM output file is empty"""
-    app = client.application
-    app.config["BUSY"] = False
-
-    root = Path(app.root_path).parent
-    m2 = root / "module_2_ref"
-    data = root / "data"
-    m2.mkdir(parents=True, exist_ok=True)
-    data.mkdir(parents=True, exist_ok=True)
-
-    # Create required files
-    (m2 / "applicant_data.json").write_text("[]", encoding="utf-8")
-
-    # Create EMPTY llm output file to trigger the size check failure
-    empty_llm_file = m2 / "llm_extend_applicant_data.json"
-    empty_llm_file.write_text("", encoding="utf-8")  # Empty file
-
-    def fake_run(args, **kwargs):
-        # Succeed for scrape and clean, succeed for LLM but leave empty file
-        script = str(args[1]).replace("\\", "/").lower() if len(args) > 1 else ""
-        if script.endswith("run.py"):  # LLM step
-            return SimpleNamespace(returncode=0, stdout="", stderr="")  # Success but empty file
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
-
-    r = client.post("/pull-data")
-   
-    assert 500 == 500
-
-
-@pytest.mark.buttons
-def test_pull_data_no_row_count_in_output(monkeypatch, client):
-    """Test pull-data when load step doesn't output row_count"""
-    app = client.application
-    app.config["BUSY"] = False
-
-    root = Path(app.root_path).parent
-    m2 = root / "module_2_ref"
-    data = root / "data"
-    m2.mkdir(parents=True, exist_ok=True)
-    data.mkdir(parents=True, exist_ok=True)
-
-    (m2 / "applicant_data.json").write_text("[]", encoding="utf-8")
-    (m2 / "llm_extend_applicant_data.json").write_text('[{"p_id": 1}]', encoding="utf-8")
-
-    def fake_run(args, **kwargs):
-        script = str(args[1]).replace("\\", "/").lower() if len(args) > 1 else ""
-        if script.endswith("load_data.py"):
-            # Return success but NO row_count in stdout
-            return SimpleNamespace(returncode=0, stdout="success: loaded data", stderr="")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
-
-    r = client.post("/pull-data")
-   
-    assert 200 == 200
-
-
-@pytest.mark.buttons
-def test_pull_data_lock_file_unlink_exception(monkeypatch, client):
-    """Test pull-data when lock file unlink raises exception"""
-    app = client.application
-    app.config["BUSY"] = False
-
-    root = Path(app.root_path).parent
-    m2 = root / "module_2_ref"
-    data = root / "data"
-    m2.mkdir(parents=True, exist_ok=True)
-    data.mkdir(parents=True, exist_ok=True)
-
-    (m2 / "applicant_data.json").write_text("[]", encoding="utf-8")
-    (m2 / "llm_extend_applicant_data.json").write_text('[{"p_id": 1}]', encoding="utf-8")
-
-    def fake_run(args, **kwargs):
-        script = str(args[1]).replace("\\", "/").lower() if len(args) > 1 else ""
-        if script.endswith("load_data.py"):
-            return SimpleNamespace(returncode=0, stdout="row_count=5", stderr="")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    # Mock lock file unlink to raise an exception
-    original_unlink = Path.unlink
-
-    def mock_unlink(self, missing_ok=False):
-        if "pull.lock" in str(self):
-            raise OSError("Mock unlink error")  # This should be caught and ignored
-        return original_unlink(self, missing_ok=missing_ok)
-
-    monkeypatch.setattr("src.flask_app.subprocess.run", fake_run)
-    monkeypatch.setattr(Path, "unlink", mock_unlink)
-
-    r = client.post("/pull-data")
-   
-    assert 200 == 200
+    out = capsys.readouterr().out
+    assert "ERROR: Could not read" in out  # message from load_data.py
 
 
 @pytest.mark.db
-def test_load_data_edge_cases(monkeypatch, tmp_path):
-    """Test load_data.py edge cases for coverage"""
+def test__read_db_config_db_not_in_config(monkeypatch, capsys, tmp_path):
+    """
+    If the file loads but has no [db] section, function prints a message and exits.
+    """
 
-    class _MockCursorNoRowcount:
-        def __init__(self):
-            self.rowcount = 0  # No rows affected
+    # Fake parser with read()->['config.ini'] but no 'db' section
+    class FakeParser(configparser.ConfigParser):
+        def read(self, path):
+            # Pretend it read successfully
+            return [str(path)]
+        def __contains__(self, key):
+            return False  # no [db]
 
-        def execute(self, sql, params=None):
-            pass
+    monkeypatch.setattr(configparser, "ConfigParser", FakeParser, raising=True)
 
-        def fetchone(self):
-            return (5,)
+    with pytest.raises(SystemExit):
+        _read_db_config(str(tmp_path / "config.ini"))
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    class _MockConnNoRowcount:
-        def cursor(self):
-            return _MockCursorNoRowcount()
-
-        def commit(self):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    monkeypatch.setattr("src.load_data.get_conn", lambda: _MockConnNoRowcount())
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
-
-    from src.load_data import load_json
-
-    # Test with record without p_id and with zero rowcount
-    test_data = [
-        {"program": "CS", "status": "Accepted", "term": "Fall 2025"},  # No p_id
-        {"p_id": 2, "program": "EE", "status": "Rejected", "term": "Spring 2025"}  # Has p_id but rowcount=0
-    ]
-    test_file = tmp_path / "test.json"
-    test_file.write_text(json.dumps(test_data), encoding="utf-8")
-
-    total, inserted, skipped, issues, report = load_json(str(test_file))
-    assert total == 2
-    assert inserted == 0  # Nothing inserted due to no p_id or zero rowcount
+    out = capsys.readouterr().out
+    assert "ERROR: 'config.ini' is missing the [db] section." in out
 
 
 @pytest.mark.db
-def test_load_data_main_with_all_options(monkeypatch, tmp_path, capsys):
-    """Test main function with all flags to cover missing lines"""
+def test__read_db_config_success(tmp_path):
+    """
+    Happy path: returns a dict with host, port, dbname, user, password.
+    """
 
-    # Create a test file
-    test_data = [{"p_id": 1, "program": "CS"}]
-    test_file = tmp_path / "test.json"
-    test_file.write_text(json.dumps(test_data), encoding="utf-8")
+    ini = tmp_path / "config.ini"
+    ini.write_text(
+        "[db]\n"
+        "host=localhost\n"
+        "port=5432\n"
+        "database=testdb\n"
+        "user=alice\n"
+        "password=secret\n",
+        encoding="utf-8",
+    )
 
-    # Mock sys.argv with all options
-    test_args = ["load_data.py", "--init", "--load", str(test_file), "--count"]
-    monkeypatch.setattr("sys.argv", test_args)
+    cfg = _read_db_config(str(ini))
+    assert cfg["host"] == "localhost"
+    assert cfg["port"] == 5432
+    assert cfg["dbname"] == "testdb"
+    assert cfg["user"] == "alice"
+    assert cfg["password"] == "secret"
 
-    # Mock all functions
-    def mock_init():
-        print("schema: ensured")
 
-    def mock_load_json(path, batch=2000):
-        return 1, 1, 0, {}, Path("report.json")
+# -----------------------------
+# main() — config-not-found and success
+# -----------------------------
 
-    def mock_count():
-        return 10
+@pytest.mark.db
+def test_main_cfg_not_found(monkeypatch, capsys):
+    """
+    main() prints two error lines and exits when _read_db_config returns {}.
+    (We bypass _read_db_config's own exit by monkeypatching it to return {}.)
+    """
 
-    monkeypatch.setattr("src.load_data.init_schema", mock_init)
-    monkeypatch.setattr("src.load_data.load_json", mock_load_json)
-    monkeypatch.setattr("src.load_data.count_rows", mock_count)
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
+    monkeypatch.setattr(ld, "_read_db_config", lambda _p="config.ini": {}, raising=True)
 
-    from src.load_data import main
-    main()
+    with pytest.raises(SystemExit):
+        ld.main()
 
-    captured = capsys.readouterr()
-    assert "schema: ensured" in captured.out
-    assert "loaded_records=1 inserted=1" in captured.out
-    assert "row_count=10" in captured.out
+    out = capsys.readouterr().out
+    assert "ERROR: DATABASE properties are not set." in out
+    assert "Check config.ini." in out
 
 
 @pytest.mark.db
-def test_load_json_with_records_missing_p_id(monkeypatch, tmp_path):
-    """Test load_json with records that don't have p_id"""
+def test_main_success(tmp_path, monkeypatch, fake_db, capsys):
+    """
+    End-to-end success of main():
+      - reads config.ini from CWD
+      - loads a JSON file with one row
+      - creates table + inserts row
+      - commits and prints the success summary
+    Uses fake DB from conftest.py (no real database).
+    """
 
-    class _MockCursor:
-        def __init__(self):
-            self.rowcount = 1
+    # Arrange: working directory contains config.ini and json file
+    monkeypatch.chdir(tmp_path)
 
-        def execute(self, sql, params=None):
-            pass
+    (tmp_path / "config.ini").write_text(
+        "[db]\n"
+        "host=localhost\n"
+        "port=5432\n"
+        "database=testdb\n"
+        "user=alice\n"
+        "password=secret\n",
+        encoding="utf-8",
+    )
+    data_file = tmp_path / "rows.json"
+    data_file.write_text(json.dumps([
+        {
+            "program": "CS",
+            "comments": "",
+            "date_added": "2025-01-01",
+            "url": "http://x",
+            "status": "Accepted",
+            "term": "Fall 2025",
+            "US/International": "International",
+            "GPA": "3.76",
+            "gre": "320",
+            "gre_v": "160",
+            "gre_aw": "4.5",
+            "Degree": "Masters",
+            "llm-generated-program": "Computer Science",
+            "llm-generated-university": "Some Uni"
+        }
+    ]), encoding="utf-8")
 
-        def fetchone(self):
-            return (1,)
+    # Make main() read our temp data file by patching sys.argv
+    argv_backup = sys.argv[:]
+    sys.argv[:] = ["load_data.py", str(data_file)]
 
-        def __enter__(self):
-            return self
+    try:
+        ld.main()
+    finally:
+        sys.argv[:] = argv_backup  # always restore
 
-        def __exit__(self, *args):
-            pass
+    # Assert: success print
+    out = capsys.readouterr().out
+    assert f"Loaded 1 rows into 'applicants' from: {data_file}" in out
 
-    class _MockConn:
-        def cursor(self):
-            return _MockCursor()
-
-        def commit(self):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    monkeypatch.setattr("src.load_data.get_conn", lambda: _MockConn())
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
-
-    from src.load_data import load_json
-
-    # Test data with records missing p_id - covers lines 83-86
-    test_data = [
-        {"program": "CS", "status": "Accepted", "term": "Fall 2025"},  # No p_id key
-        {"p_id": None, "program": "EE", "status": "Rejected"},  # p_id is None
-        {"p_id": "", "program": "Math", "status": "Pending"},  # p_id is empty string
-        {"p_id": 0, "program": "Physics", "status": "Waitlist"}  # p_id is 0 (falsy)
-    ]
-    test_file = tmp_path / "test.json"
-    test_file.write_text(json.dumps(test_data), encoding="utf-8")
-
-    total, inserted, skipped, issues, report = load_json(str(test_file))
-    assert total == 4
-    assert inserted >= 0
+    # Assert: the fake cursor executed CREATE TABLE + INSERT
+    cur = fake_db
+    # at least 2 execute calls: one CREATE TABLE, one INSERT
+    executed_sqls = " ".join(sql for (sql, _params) in cur.executed)
+    assert "CREATE TABLE IF NOT EXISTS public.applicants" in executed_sqls
+    assert "INSERT INTO public.applicants" in executed_sqls
 
 
 @pytest.mark.db
-def test_main_only_count_flag(monkeypatch, capsys):
-    """Test main with only --count flag - covers lines 119-122"""
-    monkeypatch.setattr("sys.argv", ["load_data.py", "--count"])
+def test_main_invoke(monkeypatch):
+    """
+    Covers the main-guard:
+        if __name__ == "__main__": main()
 
-    def mock_count():
-        return 42
+    Strategy:
+    - Set sys.argv so pytest flags don't become a JSON path.
+    - Make configparser.ConfigParser.read(...) return [] so _read_db_config()
+      exits early. That proves the guard actually invoked main(), and we don't
+      need any real files or DB.
+    - Expect SystemExit from the early exit path.
+    """
+    # 1) Ensure argv is clean for the module we're about to run
+    monkeypatch.setattr(sys, "argv", ["load_data.py"], raising=True)
 
-    monkeypatch.setattr("src.load_data.count_rows", mock_count)
-    monkeypatch.setattr("src.load_data.close_pool", lambda: None)
+    # 2) Force _read_db_config() to take the early-exit path
+    monkeypatch.setattr(configparser.ConfigParser, "read", lambda self, p: [], raising=True)
 
-    from src.load_data import main
-    main()
+    # 3) Execute the module as __main__ so the guard line runs
+    with pytest.raises(SystemExit):
+        runpy.run_module("load_data", run_name="__main__")
 
-    captured = capsys.readouterr()
-    assert "row_count=42" in captured.out

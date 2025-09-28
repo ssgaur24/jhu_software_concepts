@@ -1,0 +1,24 @@
+# Python / venv / caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+**/.coverage
+.coverage
+htmlcov/
+**/.venv
+**/models
+# Sphinx build
+module_4/docs/build/
+docs/build/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+config.local.ini
+
+# Artifacts
+*.sqlite
+*.log
+*.tmp

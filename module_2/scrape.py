@@ -1,261 +1,287 @@
-# step 1 — minimal scraper: single page, extract only admission status via generic regex
+import re
+import json
+import time
 
-# paginate until >= 40,000 unique entries (urllib3 + simple de-dup)
-# update —  resume + save per page, changes to run it faster
-# speed tweaks — gzip, faster writes, resume, tiny delay
-import json, re, time
-from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional
+from bs4 import BeautifulSoup, Tag, NavigableString
+from urllib.parse import urljoin, urlsplit, urlunsplit, urlparse
 import urllib3
-from bs4 import BeautifulSoup
+http = urllib3.PoolManager(headers={"User-Agent": "Mozilla/5.0"})
 
-BASE = "https://www.thegradcafe.com"
-LIST_URL = f"{BASE}/survey/"`
+url_prefix = "https://www.thegradcafe.com/survey/?page="
+target_url = "https://www.thegradcafe.com/survey/"
+results = []
+target_length = 30000
 
-# ---------------- HTTP ----------------
-def _http_get(http: urllib3.PoolManager, url: str) -> str:
-    # fetch html
-    r = http.request(
-        "GET",
-        url,
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=urllib3.Timeout(connect=5, read=20),
-    )
-    return r.data.decode("utf-8", errors="ignore")
+# ---------- small helpers ----------
 
-# ---------------- small date helpers ----------------
-_MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
-}
+def fetch(url: str) -> str:
+    r = http.request("GET", url, timeout=urllib3.Timeout(connect=5, read=15))
+    return r.data.decode("utf-8", "ignore")
 
-def _year_from_text(txt: str) -> Optional[int]:
-    # pick a 4-digit year if present
-    m = re.search(r"\b(20\d{2})\b", txt or "")
-    return int(m.group(1)) if m else None
+def t(entry: Tag, selector: str) -> str:
+    """Return stripped text for the first match of CSS selector under entry, else empty string."""
+    node = entry.select_one(selector)
+    return node.get_text(strip=True) if node else ""
 
-def _ymd_from_chip(day_mon_txt: str, fallback_year: Optional[int]) -> str:
-    # parse like "Accepted on 1 Sep" => combine with fallback year
-    m = re.search(r"on\s+(\d{1,2})\s+([A-Za-z]+)", day_mon_txt or "", flags=re.I)
-    if not m or not fallback_year:
-        return ""
-    day = int(m.group(1))
-    mon = _MONTHS.get(m.group(2).strip().lower())
-    if not mon:
-        return ""
-    return f"{fallback_year:04d}-{mon:02d}-{day:02d}"
+def first_tr_sibling_tw(tr: Tag) -> Tag | None:
+    """
+    Return the **immediate next** element-sibling <tr> iff it exists
+    and has class 'tw-border-none' (case-insensitive). Otherwise None.
+    """
+    sib = tr.next_sibling
+    # skip whitespace nodes
+    while sib and isinstance(sib, NavigableString):
+        sib = sib.next_sibling
 
-def _ymd_from_notification(notif_txt: str) -> str:
-    # parse "on 14/09/2025" or "on 14-09-2025"
-    m = re.search(r"on\s+(\d{1,2})[/-](\d{1,2})[/-](\d{4})", notif_txt or "", flags=re.I)
-    if not m:
-        return ""
-    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    return f"{y:04d}-{mth:02d}-{d:02d}"
+    # must be a <tr>
+    if not (isinstance(sib, Tag) and sib.name == "tr"):
+        return None
 
-# ---------------- list page parsing ----------------
-def _extract_rows_from_list(html: str, seen_urls: Set[str]) -> List[Dict[str, str]]:
-    # parse list page and collect base rows
-    soup = BeautifulSoup(html, "html.parser")
-    out: List[Dict[str, str]] = []
+    # must include class 'tw-border-none' (any casing)
+    classes = sib.get("class") or []
+    if isinstance(classes, str):
+        classes = classes.split()
 
-    # each result link goes to /result/<id>
-    for a in soup.select('a[href^="/result/"]'):
-        href = a.get("href", "")
-        if not href.startswith("/result/"):
+    return sib if any(c.lower() == "tw-border-none" for c in classes) else None
+
+def has_class(tr: Tag, cls: str) -> bool:
+    """True if tr has the given class among its classes."""
+    classes = tr.get("class", [])
+    return cls in classes if isinstance(classes, list) else classes == cls
+
+# ---------- extractors for each row-kind ----------
+
+def extract_first_dataset(entry: Tag) -> dict:
+    """
+    Parent row (<tr> with no class).
+    Expected columns:
+      td1 div>div -> university_name
+      td2 div>span(1) -> program_name, span(2) -> masters_phd
+      td3 -> added_on (we'll keep full text; can post-process to year)
+      td4 div -> parse 'accepted on <date>' / 'rejected on <date>'
+      td5 div dt-1 a-2 -> href (applicant URL)
+    """
+    # td1
+    university_name = t(entry, "td:nth-of-type(1) div > div")
+
+    # td2
+    program_name = t(entry, "td:nth-of-type(2) div > span:nth-of-type(1)")
+    masters_phd  = t(entry, "td:nth-of-type(2) div > span:nth-of-type(2)")
+
+    # td3 (keep raw text; optionally pull year elsewhere)
+    added_on = t(entry, "td:nth-of-type(3)")
+
+    # td4: parse accepted/rejected dates
+    status_text = t(entry, "td:nth-of-type(4) div")
+
+    # td5: href to applicant
+    # inside extract_first_dataset(...)
+    origin = f"{urlparse(target_url).scheme}://{urlparse(target_url).netloc}"
+    a = entry.select_one("td:nth-of-type(5) div dt:nth-of-type(1) > a:nth-of-type(2)")
+
+    # fallback 1: still inside first <dt>, but if there is only one <a>, use it
+    if not a:
+        dt1 = entry.select_one("td:nth-of-type(5) dt:nth-of-type(1)")
+        if dt1:
+            anchors = dt1.select("a")
+            if anchors:
+                a = anchors[min(1, len(anchors) - 1)]  # pick 2nd if exists, else 1st
+
+    # fallback 2: any anchor in td5 that looks like a result link
+    if not a:
+        a = entry.select_one("td:nth-of-type(5) a[href*='/result/']")
+
+    if a and a.has_attr("href"):
+        href = a["href"]
+        abs_url = urljoin(origin, href)  # make absolute
+        parts = urlsplit(abs_url)
+        url_link = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))  # strip ? and #
+    else:
+        url_link = ""  # no link found (leave empty string)
+
+    return {
+        "university_name": university_name,
+        "program_name": program_name,
+        "masters_phd": masters_phd,
+        "added_on": added_on,
+        "status": status_text,
+        "applicant_url": url_link,
+    }
+
+def extract_second_dataset(entry: Tag | None) -> dict:
+    """
+    Second row (tr2): must have class 'tw-border-none'.
+    Cells:
+      td.div.div(2) -> Semester + Year of program start
+      td.div.div(3) -> International/American
+      td.div.div(4..7) -> any of  'GRE 310', 'GRE V 150', 'GRE AW 3.5', 'GPA 3.62'
+    Return empty dict if entry isn’t a matching tr2.
+    """
+    out = {"term": "", "student_type": "", "gre": "", "gre_v": "", "gre_aw": "", "gpa": ""}
+    if not entry or not has_class(entry, "tw-border-none"):
+        return out
+
+    # Grab all divs inside td>div>div in order
+    divs = entry.select("td > div > div")
+    # Defensive indexing per your position notes
+    out["term"] = divs[1].get_text(strip=True) if len(divs) > 1 else ""
+    out["student_type"] = divs[2].get_text(strip=True) if len(divs) > 2 else ""
+
+    # The remaining slots (4..7) may or may not be present; map by prefix
+    for i in range(3, min(len(divs), 7)):
+        txt = divs[i].get_text(strip=True)
+        if not txt:
             continue
-        url = BASE + href
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-
-        row: Dict[str, str] = {"url": url}
-
-        # program + degree
-        cell = a.find_parent("td") or a.find_parent("div")
-        prog_txt, deg_txt = "", ""
-        if cell:
-            spans = [s.get_text(strip=True) for s in cell.select("span")]
-            if spans:
-                prog_txt = spans[0]
-                if len(spans) > 1:
-                    deg_txt = spans[1]
-
-        # term like "Fall 2026" chip
-        term_txt = ""
-        if cell:
-            chip = cell.find(string=re.compile(r"^(Fall|Spring|Summer)\s+\d{4}$"))
-            if chip:
-                term_txt = chip.strip()
-
-        # status chip near the row (Accepted / Rejected / Interview / Wait listed)
-        tr = a.find_parent("tr")
-        status_txt = ""
-        if tr:
-            # look for text tokens
-            for token in ("Accepted", "Rejected", "Interview", "Wait listed"):
-                el = tr.find(string=re.compile(rf"\b{re.escape(token)}\b"))
-                if el:
-                    status_txt = token
-                    break
-
-        # date_added column text (e.g., "September 01, 2025")
-        date_added = ""
-        if tr:
-            tds = tr.find_all("td")
-            if len(tds) >= 3:
-                date_added = tds[2].get_text(" ", strip=True)
-
-        row["program"] = prog_txt.strip()
-        row["Degree"] = deg_txt.strip()
-        row["term"] = term_txt
-        row["status"] = status_txt
-        row["date_added"] = date_added
-        row["comments"] = ""
-        row["US/International"] = ""
-        row["university"] = ""  # filled from detail
-        row["acceptance_date"] = ""
-        row["rejection_date"] = ""
-        row["GRE"] = ""
-        row["GRE_V"] = ""
-        row["GRE_AW"] = ""
-        row["GPA"] = ""
-
-        out.append(row)
+        if re.match(r"^GRE\s+[0-9]", txt, re.I):
+            out["gre"] = txt
+        elif re.match(r"^GRE\s*V\b", txt, re.I):
+            out["gre_v"] = txt
+        elif re.match(r"^GRE\s*AW\b", txt, re.I):
+            out["gre_aw"] = txt
+        elif re.match(r"^GPA\b", txt, re.I):
+            out["gpa"] = txt
 
     return out
 
-# ---------------- detail page parsing ----------------
-def _parse_detail(detail_html: str) -> Dict[str, str]:
-    # parse dt/dd blocks and special sections
-    soup = BeautifulSoup(detail_html, "html.parser")
-    mapping: Dict[str, str] = {}
+def extract_comments(entry: Tag | None) -> str:
+    """
+    Third row (tr3): only if it ALSO has class 'tw-border-none'; else return blank.
+    Content lives under 'td p'.
+    """
+    if not entry or not has_class(entry, "tw-border-none"):
+        return ""
+    p = entry.select_one("td p")
+    return p.get_text(strip=True) if p else ""
 
-    # map dt -> dd
-    for blk in soup.select("div.tw-border-t"):
-        dt = blk.find("dt")
-        dd = blk.find("dd")
-        if dt and dd:
-            key = dt.get_text(strip=True)
-            val = dd.get_text(" ", strip=True)
-            mapping[key] = val
+# ---------- main scraper ----------
 
-    # notes block
-    notes = mapping.get("Notes", "")
-    notes = re.sub(r"<[^>]+>", "", notes or "").strip()
+def scrape_data():
+    """
+    Iterate pages and build a list of result rows by stitching:
+      parent tr (no class) + its next tr (tw-border-none) + optional 3rd tr (tw-border-none for comments).
+    Stop when results reach target_length or pages exhaust.
+    """
+    param_page = 1
+    while len(results) <= target_length:
+        url = url_prefix + str(param_page)
+        html = fetch(url)
+        soup = BeautifulSoup(html, "html.parser")
 
-    # gre block (three values are rendered as list items; mapping has zeros sometimes)
-    gre = mapping.get("GRE General:", "") or ""
-    gre_v = mapping.get("GRE Verbal:", "") or ""
-    gre_aw = mapping.get("Analytical Writing:", "") or ""
+        # Only parent rows: <tr> with no 'class' attribute
+        parent_rows = [tr for tr in soup.find_all("tr") if not tr.get("class")]
 
-    # institution/program/degree/country/decision/notification
-    uni = mapping.get("Institution", "") or ""
-    prog = mapping.get("Program", "") or ""
-    deg = mapping.get("Degree Type", "") or ""
-    country = mapping.get("Degree's Country of Origin", "") or ""
-    decision = mapping.get("Decision", "") or ""
-    notif = mapping.get("Notification", "") or ""
+        if not parent_rows:
+            break  # nothing on this page; stop
 
-    # normalize blank-as-empty-string
-    def nz(x: Optional[str]) -> str:
-        return (x or "").strip()
+        for parent in parent_rows:
+            row1 = extract_first_dataset(parent)
 
-    return {
-        "university": nz(uni),
-        "program": nz(prog),
-        "Degree": nz(deg),
-        "US/International": nz(country),
-        "status_detail": nz(decision),
-        "notification": nz(notif),
-        "comments": nz(notes),
-        "GRE": nz(gre),
-        "GRE_V": nz(gre_v),
-        "GRE_AW": nz(gre_aw),
-    }
+            # tr2 (details row) : next element <tr>
+            tr2 = first_tr_sibling_tw(parent)
+            row2 = extract_second_dataset(tr2) if tr2 else {}
 
-# ---------------- merge + correct dates ----------------
-def _apply_detail_and_fix_dates(row: Dict[str, str], det: Dict[str, str]) -> None:
-    # merge detail values if present
-    for k in ("university", "program", "Degree", "US/International", "comments", "GRE", "GRE_V", "GRE_AW"):
-        v = det.get(k, "")
-        if v:
-            row[k] = v
+            # tr3 (comments row) : next element <tr> after tr2 (may not exist)
+            tr3 = first_tr_sibling_tw(tr2) if tr2 else None
+            comments = extract_comments(tr3) if tr3 else ""
+            if row1["university_name"] != "":
+                result_row = {
+                    **row1,
+                    **row2,
+                    "comments": comments,
+                }
+                results.append(result_row)
+        time.sleep(2) #to prevent throttling
+        param_page += 1
 
-    # choose final status
-    status = row.get("status") or det.get("status_detail") or ""
-    row["status"] = status
+def create_scraped_json(payload: list[dict], path: str = "scraped.json"):
+    """Write the scraped list of dicts to JSON file (UTF-8)."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    # decision dates: prefer Notification date; else derive from chip + year
-    notif = det.get("notification", "")
-    date_added = row.get("date_added", "")
-    fallback_year = _year_from_text(date_added) or _year_from_text(row.get("term", ""))
+def check_and_save_robots() -> dict:
+    """
+    Download robots.txt for the site hosting `target_url`, save it locally,
+    and check whether crawling `target_url` is allowed for `user_agent`.
 
-    iso_from_notif = _ymd_from_notification(notif)
+    Returns a small dict: {"robots_url": ..., "saved_to": ..., "allowed": True/False}
+    """
+    user_agent = "Mozilla/5.0"
+    save_path = "robots.txt"
+    origin = f"{urlparse(target_url).scheme}://{urlparse(target_url).netloc}"
+    robots_url = urljoin(origin, "/robots.txt")
 
-    if status == "Accepted":
-        if iso_from_notif:
-            row["acceptance_date"] = iso_from_notif
-        else:
-            # try chip text next to status on list row: sometimes included in status cell text
-            chip_text = row.get("status_chip_text", "")  # not set; kept for compatibility
-            # as we do not persist chip text, use date_added's year + common "Accepted on <d Mon>" pattern if present
-            if fallback_year:
-                # some list rows render like "Accepted on 1 Sep" inside nearby chip; we may not have stored it.
-                # If not available, leave as "" to avoid wrong mapping.
-                pass
-    elif status == "Rejected":
-        if iso_from_notif:
-            row["rejection_date"] = iso_from_notif
-        else:
-            if fallback_year:
-                pass
-    else:
-        # Interview/Wait listed -> leave both blank
-        pass
+    r = http.request("GET", robots_url, timeout=urllib3.Timeout(connect=5, read=10))
+    content = r.data.decode("utf-8", "ignore")
 
-# ---------------- main scrape ----------------
-def scrape_data(target: int = 30000) -> List[Dict[str, str]]:
-    http = urllib3.PoolManager()
-    seen: Set[str] = set()
-    rows: List[Dict[str, str]] = []
-    page = 1
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
-    while len(rows) < target:
-        page_url = f"{LIST_URL}?page={page}"
-        try:
-            html = _http_get(http, page_url)
-        except Exception:
-            break
+    # Use robotparser to evaluate (can_fetch ignores UA wildcards unless matched)
+    from urllib import robotparser
+    rp = robotparser.RobotFileParser()
+    rp.parse(content.splitlines())
+    allowed = rp.can_fetch(user_agent, target_url)
 
-        page_rows = _extract_rows_from_list(html, seen)
-        if not page_rows:
-            break
+    return {"robots_url": robots_url, "saved_to": save_path, "allowed": bool(allowed)}
 
-        # enrich page rows from detail and fix dates
-        for r in page_rows:
-            try:
-                det_html = _http_get(http, r["url"])
-                det = _parse_detail(det_html)
-                _apply_detail_and_fix_dates(r, det)
-            except Exception:
-                # keep the list-row data if detail fetch fails
-                pass
 
-        rows.extend(page_rows)
-        page += 1
-        # time.sleep(0.3)
-
-    return rows
-
-def save_data(rows: List[Dict[str, str]], path: Path) -> None:
-    # save json
-    path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+# ---------- entrypoint ----------
 
 if __name__ == "__main__":
-    # run and tiny print
-    data = scrape_data()
-    print("total:", len(data))
-    print(json.dumps(data[:3], ensure_ascii=False, indent=2))
-    out_path = Path(__file__).parent / "applicant_data.json"
-    save_data(data, out_path)
+    robot_output = check_and_save_robots()
+    if robot_output["allowed"]:
+        scrape_data()
+        create_scraped_json(results)
+    else:
+        print(f"Not allowed by robots.txt ({robot_output['robots_url']}).")
+        if robot_output.get("error"):
+            print("Fetch error:", robot_output["error"])
+
+
+#a.	Confirm the robot.txt file permits scraping.
+#b.	Use urllib3 to request data from grad cafe.
+#c.	Use beautifulSoup/regex/string search methods to find admissions data.
+"""
+table >
+tr 1
+    td1.div.div value  = university_name
+
+    td2.div.span 1 = program_name
+    td2.div.span 2 = Masters_phd
+
+    td3 = extract only year added_on value
+    
+    td4.div accepted on date rejected on date
+    td5 .div.dt1.a2 href value has URL Link to applicant
+
+tr 2  has class tw-border-none and is next tr to the parent tr
+    td.div.div1  accepted on date rejected on date  - if tg5 doesnt have data
+    td.div.div2 Semester and year of Program start
+    td.div.div3 International/American student
+    td.div.div 4 5 6 or 7  can have either of these values or none: "GRE 310"   "GRE V 150"  "GRE AW 3.5" "GPA 3.62" , find gre , gre_v, gre_aw, gpa
+
+tr 3  if class = tw-border-none  then 
+        tr.td.p value is comments 
+
+else  its next value
+    
+    
+    ·	The data categories pulled SHALL include:
+o	Program Name
+o	University
+o	Comments (if available)
+o	Date of Information Added to Grad Café
+o	URL link to applicant entry
+o	Applicant Status
+▪	If Accepted: Acceptance Date
+▪	If Rejected: Rejection Date
+o	Semester and Year of Program Start (if available)
+o	International / American Student (if available)
+o	GRE Score (if available)
+o	GRE V Score (if available)
+o	Masters or PhD (if available)
+o	GPA (if available)
+o	GRE AW (if available)
+
+"""
+
