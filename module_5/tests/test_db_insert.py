@@ -1,6 +1,6 @@
 # module_4/tests/test_db_insert.py
 """
-Tests for load_data.py (DB insert path) — beginner-friendly and minimal.
+Tests for load_data.py (DB insert path) â€" beginner-friendly and minimal.
 
 Covers:
 - _num() helper (None, success, and no-match cases)
@@ -12,7 +12,6 @@ All DB calls use the fake psycopg connection from conftest.py (fake_db).
 All filesystem/config access uses tmp paths + monkeypatching where needed.
 """
 
-import os
 import sys
 import json
 import runpy
@@ -48,7 +47,7 @@ def test__num_success():
 
 
 @pytest.mark.db
-def test__num_else_None():
+def test__num_else_none():
     """
     If the text contains no number, _num returns None.
     """
@@ -85,10 +84,13 @@ def test__read_db_config_db_not_in_config(monkeypatch, capsys, tmp_path):
 
     # Fake parser with read()->['config.ini'] but no 'db' section
     class FakeParser(configparser.ConfigParser):
-        def read(self, path):
-            # Pretend it read successfully
-            return [str(path)]
+        """Mock ConfigParser without db section."""
+        def read(self, *_args):
+            """Mock read method that pretends file was read successfully."""
+            # Accept variable arguments to match parent signature
+            return ["config.ini"]
         def __contains__(self, key):
+            """Mock contains method that returns False for db section."""
             return False  # no [db]
 
     monkeypatch.setattr(configparser, "ConfigParser", FakeParser, raising=True)
@@ -126,7 +128,7 @@ def test__read_db_config_success(tmp_path):
 
 
 # -----------------------------
-# main() — config-not-found and success
+# main() â€" config-not-found and success
 # -----------------------------
 
 @pytest.mark.db
@@ -232,4 +234,3 @@ def test_main_invoke(monkeypatch):
     # 3) Execute the module as __main__ so the guard line runs
     with pytest.raises(SystemExit):
         runpy.run_module("load_data", run_name="__main__")
-
