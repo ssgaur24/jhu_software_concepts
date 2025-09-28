@@ -11,7 +11,6 @@ All external work is faked by conftest.py (no real DB, no real subprocess).
 import os
 import runpy
 import subprocess
-from subprocess import run as real_run
 import pytest
 from flask import Flask
 
@@ -134,7 +133,7 @@ def test_pull_data_failure_reports_error(client, tmp_lock, fake_get_rows, monkey
     # Fail only the first call; delegate all other calls to the real patched fake
     call_count = {"n": 0}
 
-    def failing_run(cmd, **kwargs):
+    def failing_run(*args, **kwargs):
         """Mock subprocess run with first call failing."""
         call_count["n"] += 1
         # On first pipeline step, simulate failure
@@ -149,7 +148,8 @@ def test_pull_data_failure_reports_error(client, tmp_lock, fake_get_rows, monkey
             return FailedResult()
 
         # Otherwise, let conftest's fake_subprocess handle
-        return real_run(cmd, **kwargs)
+        from subprocess import run as real_run
+        return real_run(*args, **kwargs)
 
     # Apply our failure on top of the existing fake_subprocess
     monkeypatch.setattr(subprocess, "run", failing_run, raising=True)
@@ -259,12 +259,12 @@ def test__run(monkeypatch, app_test_module):
         stdout = "hello\n" * 10
         stderr = "warn\n" * 10
 
-    def fake_run(**_kwargs):
+    def fake_run(*args, **kwargs):
         """Mock subprocess.run that validates parameters and returns result."""
         # Validate minimal expectations about how _run calls subprocess.run
-        assert _kwargs.get("capture_output") is True
-        assert _kwargs.get("text") is True
-        assert _kwargs.get("shell") is False
+        assert kwargs.get("capture_output") is True
+        assert kwargs.get("text") is True
+        assert kwargs.get("shell") is False
         return MockResult()
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
@@ -315,15 +315,16 @@ def test_pull_data_applicant_data_json_not_found(client, tmp_lock, fake_get_rows
     tmp_lock.clear_running()
     fake_get_rows.set([("Q", "A")])
 
-    def ok_run(**_kwargs):
+    def ok_run(*args, **kwargs):
         """Mock successful subprocess run."""
 
         # pylint: disable=too-few-public-methods
         class OkResult:
             """Mock successful result."""
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
+            def __init__(self):
+                self.returncode = 0
+                self.stdout = "ok"
+                self.stderr = ""
 
         return OkResult()
 
@@ -350,8 +351,7 @@ def test_pull_data_applicant_data_json_not_found(client, tmp_lock, fake_get_rows
 
 
 @pytest.mark.buttons
-def test_pull_data_llm_standardizer_extended_json_exists\
-                (client, tmp_lock, fake_get_rows, monkeypatch):
+def test_pull_data_llm_standardizer_extended_json_exists(client, tmp_lock, fake_get_rows, monkeypatch):
     """
     If the LLM 'extended' JSON already exists, the app constructs the LLM command
     accordingly (uses the extended file). We don't assert internals of the command—
@@ -360,15 +360,16 @@ def test_pull_data_llm_standardizer_extended_json_exists\
     tmp_lock.clear_running()
     fake_get_rows.set([("Q", "A")])
 
-    def ok_run(**_kwargs):
+    def ok_run(*args, **kwargs):
         """Mock successful subprocess run with JSON output."""
 
         # pylint: disable=too-few-public-methods
         class JsonResult:
             """Mock result with JSON output."""
-            returncode = 0
-            stdout = "[]"  # valid JSON array (so not the invalid JSON branch)
-            stderr = ""
+            def __init__(self):
+                self.returncode = 0
+                self.stdout = "[]"  # valid JSON array (so not the invalid JSON branch)
+                self.stderr = ""
 
         return JsonResult()
 
@@ -494,16 +495,17 @@ def test_pull_data_scrape_fail(client, tmp_lock, fake_get_rows, monkeypatch):
     # 2) Fail the first subprocess call
     calls = {"n": 0}
 
-    def fake_run(**_kwargs):
+    def fake_run(*args, **kwargs):
         """Mock subprocess run with first call failing."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            returncode = 1 if calls["n"] == 1 else 0
-            stdout = "" if calls["n"] == 1 else "ok"
-            stderr = "scrape failed" if calls["n"] == 1 else ""
+            def __init__(self):
+                self.returncode = 1 if calls["n"] == 1 else 0
+                self.stdout = "" if calls["n"] == 1 else "ok"
+                self.stderr = "scrape failed" if calls["n"] == 1 else ""
 
         return Result()
 
@@ -542,16 +544,17 @@ def test_pull_data_clean_fail(client, tmp_lock, fake_get_rows, monkeypatch):
     # 2) SCRAPE ok, CLEAN fail
     calls = {"n": 0}
 
-    def fake_run(**_kwargs):
+    def fake_run(*args, **kwargs):
         """Mock subprocess run with clean step failing."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            returncode = 0 if calls["n"] == 1 else 1
-            stdout = "ok" if calls["n"] == 1 else ""
-            stderr = "" if calls["n"] == 1 else "clean failed"
+            def __init__(self):
+                self.returncode = 0 if calls["n"] == 1 else 1
+                self.stdout = "ok" if calls["n"] == 1 else ""
+                self.stderr = "" if calls["n"] == 1 else "clean failed"
 
         return Result()
 
@@ -591,17 +594,18 @@ def test_pull_data_llm_step_fail(client, tmp_lock, fake_get_rows, monkeypatch):
     # 2) SCRAPE ok, CLEAN ok, LLM fail
     calls = {"n": 0}
 
-    def run_fail_llm(**_kwargs):
+    def run_fail_llm(*args, **kwargs):
         """Mock subprocess run with LLM step failing."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            if calls["n"] in (1, 2):
-                returncode, stdout, stderr = 0, "ok", ""
-            else:
-                returncode, stdout, stderr = 1, "", "llm failed"
+            def __init__(self):
+                if calls["n"] in (1, 2):
+                    self.returncode, self.stdout, self.stderr = 0, "ok", ""
+                else:
+                    self.returncode, self.stdout, self.stderr = 1, "", "llm failed"
 
         return Result()
 
@@ -641,17 +645,18 @@ def test_pull_data_llm_step_invalid_json(client, tmp_lock, fake_get_rows, monkey
     # 2) SCRAPE ok, CLEAN ok, LLM ok rc but bad stdout
     calls = {"n": 0}
 
-    def run_invalid_json(**_kwargs):
+    def run_invalid_json(*args, **kwargs):
         """Mock subprocess run with invalid JSON output."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            if calls["n"] in (1, 2):
-                returncode, stdout, stderr = 0, "ok", ""
-            else:
-                returncode, stdout, stderr = 0, "NOT_JSON", ""
+            def __init__(self):
+                if calls["n"] in (1, 2):
+                    self.returncode, self.stdout, self.stderr = 0, "ok", ""
+                else:
+                    self.returncode, self.stdout, self.stderr = 0, "NOT_JSON", ""
 
         return Result()
 
@@ -691,19 +696,20 @@ def test_pull_data_load_db_fail(client, tmp_lock, fake_get_rows, monkeypatch):
     # 2) SCRAPE ok, CLEAN ok, LLM ok (valid '[]'), LOAD fails
     calls = {"n": 0}
 
-    def run_load_fail(**_kwargs):
+    def run_load_fail(*args, **kwargs):
         """Mock subprocess run with load step failing."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            if calls["n"] in (1, 2):  # scrape/clean
-                returncode, stdout, stderr = 0, "ok", ""
-            elif calls["n"] == 3:  # llm
-                returncode, stdout, stderr = 0, "[]", ""
-            else:  # load
-                returncode, stdout, stderr = 1, "", "load failed"
+            def __init__(self):
+                if calls["n"] in (1, 2):  # scrape/clean
+                    self.returncode, self.stdout, self.stderr = 0, "ok", ""
+                elif calls["n"] == 3:  # llm
+                    self.returncode, self.stdout, self.stderr = 0, "[]", ""
+                else:  # load
+                    self.returncode, self.stdout, self.stderr = 1, "", "load failed"
 
         return Result()
 
@@ -744,19 +750,20 @@ def test_pull_data_success(client, tmp_lock, fake_get_rows, monkeypatch):
     # 2) All steps ok
     calls = {"n": 0}
 
-    def run_all_ok(**_kwargs):
+    def run_all_ok(*args, **kwargs):
         """Mock subprocess run with all steps succeeding."""
         calls["n"] += 1
 
         # pylint: disable=too-few-public-methods
         class Result:
             """Mock subprocess result."""
-            if calls["n"] in (1, 2):
-                returncode, stdout, stderr = 0, "ok", ""
-            elif calls["n"] == 3:  # LLM
-                returncode, stdout, stderr = 0, "[]", ""
-            else:  # LOAD
-                returncode, stdout, stderr = 0, "loaded", ""
+            def __init__(self):
+                if calls["n"] in (1, 2):
+                    self.returncode, self.stdout, self.stderr = 0, "ok", ""
+                elif calls["n"] == 3:  # LLM
+                    self.returncode, self.stdout, self.stderr = 0, "[]", ""
+                else:  # LOAD
+                    self.returncode, self.stdout, self.stderr = 0, "loaded", ""
 
         return Result()
 
@@ -769,15 +776,10 @@ def test_pull_data_success(client, tmp_lock, fake_get_rows, monkeypatch):
 
 
 @pytest.mark.buttons
-def test_pull_data_exception_covers_clear_lock_and_message\
-                (client, tmp_lock, fake_get_rows, monkeypatch):
+def test_pull_data_exception_covers_clear_lock_and_message(client, tmp_lock, fake_get_rows, monkeypatch):
     """
-    Covers the broad except in pull_data:
-      except Exception as e:
-          clear_pull_lock()
-          return redirect(url_for("index", msg=f"Pull failed: {e}", level="error"))
-
-    We force an exception on the first pipeline call, after making SCRAPE
+    Covers the OSError except in pull_data.
+    We force an OSError on the first pipeline call, after making SCRAPE
     appear to exist so the code enters the try-block. We then verify:
       - the error message "Pull failed: ..." appears
       - the lock is cleared (pull_running=false)
@@ -797,20 +799,21 @@ def test_pull_data_exception_covers_clear_lock_and_message\
 
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
-    # First subprocess call raises -> triggers except path
-    def boom_run(*_args, **_kwargs):
-        """Mock subprocess run that raises an exception."""
-        raise RuntimeError("kaboom")
+    # First subprocess call raises OSError -> triggers except path
+    def boom_run(*args, **kwargs):
+        """Mock subprocess run that raises an OSError."""
+        raise OSError("kaboom")  # Changed from RuntimeError to OSError
 
     monkeypatch.setattr(subprocess, "run", boom_run, raising=True)
 
-    # Follow redirects so ?msg=... is rendered in the HTML
+    # The app should catch the OSError and redirect with error message
     resp = client.post("/pull-data", follow_redirects=True)
     assert resp.status_code == 200
     assert b"Pull failed:" in resp.data  # message set by the except block
     # Lock must be cleared in the except block
     health = client.get("/health")
     assert health.json["pull_running"] is False
+
 
 
 @pytest.mark.web

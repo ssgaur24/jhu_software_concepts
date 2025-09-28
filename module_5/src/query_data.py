@@ -68,7 +68,7 @@ def _latest_term_filter(cur) -> tuple[str, str]:
         # 2) Fallback: derive latest year from term text
         stmt_year_from_term = sql.SQL("""
             WITH yrs AS (
-              SELECT (regexp_matches(term, '(19|20)\\d{2}', 'g'))[1]::int AS y
+              SELECT (regexp_matches(term, '(19|20)\\d{{2}}', 'g'))[1]::int AS y
               FROM {tbl}
               WHERE term IS NOT NULL
             )
@@ -164,7 +164,7 @@ def q1_5(cur, rows_out, tbl):
                 WHERE term ILIKE %(season)s AND term ILIKE 
                 %(year)s
                 LIMIT 1;
-            """).format(tbl=tbl)
+            """).format(tbl=tbl, term_cond=sql.SQL("TRUE"))
     q1 = _one_value(cur, stmt_q1, {"season": f"%{_TERM_SEASON}%", "year":
         f"%{_TERM_YEAR}%"})
     rows_out.append((q_text, f"Answer: Applicant count: {int(q1 or 0)}"))

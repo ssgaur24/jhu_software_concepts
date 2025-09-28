@@ -12,7 +12,9 @@ import pytest
 
 
 @pytest.mark.buttons
-def test_post_pull_data_returns_200_and_triggers_loader(client, tmp_lock, fake_get_rows, monkeypatch):
+def test_post_pull_data_returns_200_and_triggers_loader(
+        client, tmp_lock, fake_get_rows, monkeypatch
+):
     """
     i) POST /pull-data returns 200 (follow redirects)
     ii) Loader is triggered after LLM stdout is captured as JSON.
@@ -27,52 +29,62 @@ def test_post_pull_data_returns_200_and_triggers_loader(client, tmp_lock, fake_g
 
     # Make pipeline files "exist"
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for pipeline files."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # Fake subprocess pipeline (scrape -> clean -> llm -> load)
     seen = {"load_called": False}
 
-    def fake_run(cmd, cwd=None, env=None, capture_output=False, text=False, encoding=None, shell=False):
-        class R: pass
-        r = R()
+    def fake_run(*args, **kwargs):
+        """Mock subprocess.run for pipeline steps."""
+        cmd = args[0] if args else kwargs.get('cmd', [])
+        cwd = kwargs.get('cwd', '')
+
+        # pylint: disable=too-few-public-methods
+        class MockResult:
+            """Mock subprocess result."""
+
+            def __init__(self, returncode=0, stdout="", stderr=""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
 
         # Normalize command for robust checks
         is_seq = isinstance(cmd, (list, tuple))
-        #cmd_str = " ".join(str(c) for c in (cmd or [])) if is_seq else str(cmd)
-        # Normalize to string for robust checks
         cmd_str = " ".join(str(c) for c in (cmd if isinstance(cmd, (list, tuple)) else [cmd]))
         last = os.path.basename(str(cmd[-1])) if is_seq and cmd else ""
 
         # 1) scrape ok
         if last == "scrape.py":
-            r.returncode, r.stdout, r.stderr = 0, "ok", ""
-            return r
+            return MockResult(0, "ok", "")
 
         # 2) clean ok
         if last == "clean.py":
-            r.returncode, r.stdout, r.stderr = 0, "ok", ""
-            return r
+            return MockResult(0, "ok", "")
 
-        # 3) llm ok -> stdout JSON (cwd should be module_2/llm_hosting)
+        # 3) llm ok -> stdout JSON
         if last == "app.py" and (cwd or "").replace("\\", "/").endswith("/module_2/llm_hosting"):
-            r.returncode = 0
-            r.stdout = json.dumps([{"program": "X", "url": "U", "term": "T"}])
-            r.stderr = ""
-            return r
+            stdout_data = json.dumps([{"program": "X", "url": "U", "term": "T"}])
+            return MockResult(0, stdout_data, "")
 
-        # 4) load invoked (detect any of: load_data.py path or `-m load_data`)
-        if ("load_data.py" in cmd_str) or (" -m load_data" in cmd_str) \
-                or ("app.py" in cmd_str and "--file" in cmd_str and "--prev" in cmd_str):
+        # 4) load invoked
+        if (("load_data.py" in cmd_str) or (" -m load_data" in cmd_str)
+                or ("app.py" in cmd_str and "--file" in cmd_str and "--prev" in cmd_str)):
             seen["load_called"] = True
-            return (0, "ok\n")
-        return (0, "")
+            return MockResult(0, "ok", "")
 
+        return MockResult(0, "", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
 
@@ -103,8 +115,8 @@ def test_busy_gating_returns_409_for_both_routes(client, tmp_lock, fake_get_rows
     tmp_lock.set_running()
     fake_get_rows.set([("Q", "A")])
 
-    r1 = client.post("/pull-data")          # no follow_redirects on purpose
-    r2 = client.post("/update-analysis")    # no follow_redirects on purpose
+    r1 = client.post("/pull-data")  # no follow_redirects on purpose
+    r2 = client.post("/update-analysis")  # no follow_redirects on purpose
 
     assert r1.status_code in (302, 409)
     assert r2.status_code in (302, 409)
@@ -195,14 +207,18 @@ def test_pull_data_failure_reports_error(client, tmp_lock, fake_get_rows, monkey
     calls = {"n": 0}
 
     def failing_once(cmd, **kwargs):
+        """Mock subprocess.run that fails on first call."""
         calls["n"] += 1
         if calls["n"] == 1:
-            class R:
+            # pylint: disable=too-few-public-methods
+            class FailedResult:
+                """Mock failed subprocess result."""
                 returncode = 1
                 stdout = ""
                 stderr = "boom"
-            return R()
-        return original(cmd, **kwargs)
+
+            return FailedResult()
+        return original(cmd, check=False, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", failing_once, raising=True)
 

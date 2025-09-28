@@ -139,14 +139,14 @@ class SimpleCompleted:
 @pytest.fixture
 def fake_subprocess(monkeypatch):
     """
-    Patches subprocess.run:
-      - scrape.py        -> rc=0, "scrape ok"
-      - clean.py         -> rc=0, "clean ok"
-      - llm_hosting/...  -> rc=0, stdout is JSON array (what app expects)
-      - load_data.py     -> rc=0, "loaded ok"
+    Patches subprocess.run with proper argument handling.
     """
-    def _fake_run(cmd, **_kwargs):
+
+    def _fake_run(*args, **kwargs):
+        # Handle both positional and keyword arguments
+        cmd = args[0] if args else kwargs.get('cmd', [])
         cmd_str = " ".join(map(str, cmd))
+
         if "scrape.py" in cmd_str:
             return SimpleCompleted(0, "scrape ok", "")
         if "clean.py" in cmd_str:
@@ -296,3 +296,34 @@ def fake_get_rows(monkeypatch):
         monkeypatch.setattr(app_module, "get_rows", lambda: rows, raising=True)
 
     return types.SimpleNamespace(set=set_rows)
+
+
+@pytest.fixture
+def enhanced_fake_db(monkeypatch):
+    """
+    Enhanced fake DB that comprehensively patches psycopg across all modules.
+    """
+    cur = FakeCursor()
+
+    def _fake_connect(*args, **kwargs):
+        return FakeConnection(cur)
+
+    # Import and patch psycopg in multiple locations
+    import psycopg
+    monkeypatch.setattr(psycopg, "connect", _fake_connect, raising=True)
+
+    # Patch in src.load_data
+    try:
+        import src.load_data as ld
+        monkeypatch.setattr(ld.psycopg, "connect", _fake_connect, raising=True)
+    except (ImportError, AttributeError):
+        pass
+
+    # Patch in src.query_data
+    try:
+        import src.query_data as qd
+        monkeypatch.setattr(qd.psycopg, "connect", _fake_connect, raising=True)
+    except (ImportError, AttributeError):
+        pass
+
+    return cur
