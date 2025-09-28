@@ -70,8 +70,11 @@ def test_post_pull_data_returns_200_and_triggers_loader(client, tmp_lock, fake_g
         if ("load_data.py" in cmd_str) or (" -m load_data" in cmd_str) \
                 or ("app.py" in cmd_str and "--file" in cmd_str and "--prev" in cmd_str):
             seen["load_called"] = True
-            return (0, "ok\n")
-        return (0, "")
+            r.returncode, r.stdout, r.stderr = 0, "loaded", ""
+            return r
+        # default
+        r.returncode, r.stdout, r.stderr = 0, "", ""
+        return r
 
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
