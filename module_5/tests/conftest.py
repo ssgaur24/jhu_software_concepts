@@ -1,17 +1,20 @@
-# conftest.py
-# -----------------------------------------------------------------------------
-# Purpose:
-#   - Make imports from module_4/src work inside tests
-#   - Replace real DB with a tiny fake (no network, no real tables)
-#   - Replace subprocess.run so scrape/clean/LLM/load never actually run
-#   - Replace render_template so tests don't need real HTML templates
-#   - Provide a Flask test client ready to use in tests
-#   - Provide simple helpers to simulate "pull is running" via a lock file
-# -----------------------------------------------------------------------------
+# -*- coding: utf-8 -*-
+"""
+conftest.py - Test configuration and fixtures for module_4 tests.
+
+Purpose:
+  - Make imports from module_4/src work inside tests
+  - Replace real DB with a tiny fake (no network, no real tables)
+  - Replace subprocess.run so scrape/clean/LLM/load never actually run
+  - Replace render_template so tests don't need real HTML templates
+  - Provide a Flask test client ready to use in tests
+  - Provide simple helpers to simulate "pull is running" via a lock file
+"""
 
 import sys
-import os
 import json
+import subprocess
+import importlib
 from pathlib import Path
 import types
 import pytest
@@ -43,6 +46,7 @@ class FakeCursor:
         self._all_queue = []        # lists of rows to return for fetchall()
 
     def execute(self, sql, params=None):
+        """Record SQL execution."""
         self.executed.append((sql, params))
 
     # ---- test helpers (you call these in your tests) ----
@@ -56,16 +60,20 @@ class FakeCursor:
 
     # ---- what the app code will call ----
     def fetchone(self):
+        """Return next queued value for fetchone()."""
         return self._one_queue.pop(0) if self._one_queue else None
 
     def fetchall(self):
+        """Return next queued list of rows for fetchall()."""
         return self._all_queue.pop(0) if self._all_queue else []
 
     # context manager support: "with conn.cursor() as cur:"
     def __enter__(self):
+        """Context manager entry."""
         return self
 
     def __exit__(self, *_):
+        """Context manager exit."""
         return False
 
 
@@ -75,18 +83,21 @@ class FakeConnection:
         self._cursor = cursor
 
     def cursor(self):
+        """Return the fake cursor."""
         return self._cursor
 
     def commit(self):
-        pass
+        """Mock commit operation."""
 
     def close(self):
-        pass
+        """Mock close operation."""
 
     def __enter__(self):
+        """Context manager entry."""
         return self
 
     def __exit__(self, *_):
+        """Context manager exit."""
         return False
 
 
@@ -105,7 +116,6 @@ def fake_db(monkeypatch):
         return FakeConnection(cur)
 
     # Import psycopg and patch its connect function
-    import importlib
     psycopg = importlib.import_module("psycopg")
     monkeypatch.setattr(psycopg, "connect", _fake_connect, raising=True)
 
@@ -117,6 +127,7 @@ def fake_db(monkeypatch):
 #    - We look at the command string and return a simple "success" object.
 #    - For the LLM step we return a small JSON list on stdout.
 # =============================================================================
+# pylint: disable=too-few-public-methods
 class SimpleCompleted:
     """Tiny stand-in for subprocess.CompletedProcess (only fields we use)."""
     def __init__(self, returncode=0, stdout="", stderr=""):
@@ -134,7 +145,7 @@ def fake_subprocess(monkeypatch):
       - llm_hosting/...  -> rc=0, stdout is JSON array (what app expects)
       - load_data.py     -> rc=0, "loaded ok"
     """
-    def _fake_run(cmd, cwd=None, env=None, capture_output=False, text=False, encoding=None):
+    def _fake_run(cmd, **_kwargs):
         cmd_str = " ".join(map(str, cmd))
         if "scrape.py" in cmd_str:
             return SimpleCompleted(0, "scrape ok", "")
@@ -156,7 +167,6 @@ def fake_subprocess(monkeypatch):
             return SimpleCompleted(0, "loaded ok", "")
         return SimpleCompleted(0, "", "")
 
-    import subprocess
     monkeypatch.setattr(subprocess, "run", _fake_run, raising=True)
 
 
@@ -166,18 +176,16 @@ def fake_subprocess(monkeypatch):
 #    - We redirect LOCK_PATH to a temp file so tests can simulate "pull running"
 # =============================================================================
 @pytest.fixture
-def app_mod(monkeypatch, tmp_path):
+def app_test_module(monkeypatch, tmp_path):
     """
     Imports src/app.py and patches:
       - render_template(...) with a tiny HTML string (easy assertions)
       - LOCK_PATH -> tmp file (safe place for "pull running" flag)
-    Returns the imported module so tests can access app_mod.app (Flask app).
+    Returns the imported module so tests can access app_test_module.app (Flask app).
     """
-    import importlib
-    app_mod = importlib.import_module("app")
+    app_module = importlib.import_module("app")
 
     # Build very small HTML for predictable tests
-    # in tests/conftest.py, inside app_mod fixture:
     def _fake_render_template(*_args, **kwargs):
         """
         Minimal HTML so tests can assert page title, buttons, status, and Q/A.
@@ -220,26 +228,26 @@ def app_mod(monkeypatch, tmp_path):
         return "\n".join(lines)
 
     # Patch the function the app calls to render HTML
-    monkeypatch.setattr(app_mod, "render_template", _fake_render_template, raising=True)
+    monkeypatch.setattr(app_module, "render_template", _fake_render_template, raising=True)
 
     # Point the lock path into a temporary folder
     lock_path = tmp_path / "pull.lock"
-    monkeypatch.setattr(app_mod, "LOCK_PATH", str(lock_path), raising=True)
+    monkeypatch.setattr(app_module, "LOCK_PATH", str(lock_path), raising=True)
 
-    return app_mod
+    return app_module
 
 
 # =============================================================================
 # 5) Flask test client ready to go (DB + subprocess already faked by fixtures)
 # =============================================================================
 @pytest.fixture
-def client(app_mod, fake_db, fake_subprocess):
+def client(app_test_module):
     """
     Creates a Flask test client with TESTING mode on.
-    Because app_mod/fake_db/fake_subprocess are listed as dependencies here,
-    they are applied automatically before you get the client.
+    Because app_test_module is listed as dependency here,
+    the patches are applied automatically before you get the client.
     """
-    flask_app = app_mod.app
+    flask_app = app_test_module.app
     flask_app.config["TESTING"] = True
     return flask_app.test_client()
 
@@ -248,19 +256,21 @@ def client(app_mod, fake_db, fake_subprocess):
 # 6) Simple helpers to set/clear the "pull is running" lock file
 # =============================================================================
 @pytest.fixture
-def tmp_lock(app_mod):
+def tmp_lock(app_test_module):
     """
     Gives you two helper functions:
       tmp_lock.set_running() -> create the lock file
       tmp_lock.clear_running() -> remove the lock file
     Use this to simulate that a Pull is in progress.
     """
-    lock_file = Path(app_mod.LOCK_PATH)
+    lock_file = Path(app_test_module.LOCK_PATH)
 
     def set_running():
+        """Create lock file to simulate pull in progress."""
         lock_file.write_text("running", encoding="utf-8")
 
     def clear_running():
+        """Remove lock file to clear pull state."""
         if lock_file.exists():
             lock_file.unlink()
 
@@ -277,13 +287,12 @@ def fake_get_rows(monkeypatch):
     Overrides both query_data.get_rows AND app.get_rows so the Flask route
     sees our fake rows even though app.py imported the symbol at import time.
     """
-    import importlib
     qmod = importlib.import_module("query_data")
-    app_mod = importlib.import_module("app")  # app.py did: from query_data import get_rows
+    app_module = importlib.import_module("app")  # app.py did: from query_data import get_rows
 
     def set_rows(rows):
+        """Set fake rows to be returned by get_rows()."""
         monkeypatch.setattr(qmod, "get_rows", lambda: rows, raising=True)
-        monkeypatch.setattr(app_mod, "get_rows", lambda: rows, raising=True)
+        monkeypatch.setattr(app_module, "get_rows", lambda: rows, raising=True)
 
     return types.SimpleNamespace(set=set_rows)
-

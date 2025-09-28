@@ -9,10 +9,12 @@ All external work is faked by conftest.py (no real DB, no real subprocess).
 """
 
 import os
-import subprocess
-import pytest
 import runpy
+import subprocess
+from subprocess import run as real_run
+import pytest
 from flask import Flask
+
 
 @pytest.mark.web
 def test_app_routes_exist(client, fake_get_rows):
@@ -129,25 +131,27 @@ def test_pull_data_failure_reports_error(client, tmp_lock, fake_get_rows, monkey
     Failure path: make the first subprocess call return a non-zero rc so the app
     reports an error. This covers the error branch in app.py.
     """
-    from subprocess import run as real_run
-
     # Fail only the first call; delegate all other calls to the real patched fake
     call_count = {"n": 0}
 
     def failing_run(cmd, **kwargs):
+        """Mock subprocess run with first call failing."""
         call_count["n"] += 1
         # On first pipeline step, simulate failure
         if call_count["n"] == 1:
-            class R:  # minimal object like CompletedProcess
+            # pylint: disable=too-few-public-methods
+            class FailedResult:
+                """Mock failed subprocess result."""
                 returncode = 1
                 stdout = ""
                 stderr = "boom"
-            return R()
+
+            return FailedResult()
+
         # Otherwise, let conftest's fake_subprocess handle
         return real_run(cmd, **kwargs)
 
     # Apply our failure on top of the existing fake_subprocess
-    import subprocess
     monkeypatch.setattr(subprocess, "run", failing_run, raising=True)
 
     tmp_lock.clear_running()
@@ -161,6 +165,7 @@ def test_pull_data_failure_reports_error(client, tmp_lock, fake_get_rows, monkey
     # Expect an error-like status level or message (depends on app.py wording)
     # We at least assert the status container is present.
     assert b"id='status'" in body
+
 
 # ---------------------------------------------------------------------------
 # Additional tests focused on app.py branches (Part 1 of 2)
@@ -187,34 +192,34 @@ def test_is_pull_running(tmp_lock, client):
 
 
 @pytest.mark.web
-def test_start_pull_lock(app_mod, client):
+def test_start_pull_lock(app_test_module, client):
     """
     start_pull_lock() creates the lock file so the app considers a pull 'running'.
     We indirectly verify via /health.
     """
     # Call the function directly
-    app_mod.start_pull_lock()
+    app_test_module.start_pull_lock()
     try:
         r = client.get("/health")
         assert r.json["pull_running"] is True
     finally:
-        app_mod.clear_pull_lock()
+        app_test_module.clear_pull_lock()
 
 
 @pytest.mark.web
-def test_clear_pull_lock_success(app_mod, client, tmp_lock):
+def test_clear_pull_lock_success(app_test_module, client, tmp_lock):
     """
     clear_pull_lock() removes the lock file when it exists.
     After clearing, /health should show pull_running=false.
     """
     tmp_lock.set_running()  # ensure it exists
-    app_mod.clear_pull_lock()
+    app_test_module.clear_pull_lock()
     r = client.get("/health")
     assert r.json["pull_running"] is False
 
 
 @pytest.mark.web
-def test_clear_pull_lock_exception(monkeypatch, app_mod, client, tmp_lock):
+def test_clear_pull_lock_exception(monkeypatch, app_test_module, client, tmp_lock):
     """
     clear_pull_lock() swallows exceptions (broad try/except in app.py).
     We simulate an OSError from os.remove and verify the app doesn't crash.
@@ -222,40 +227,48 @@ def test_clear_pull_lock_exception(monkeypatch, app_mod, client, tmp_lock):
     tmp_lock.set_running()
 
     real_remove = os.remove
+
     def boom_remove(path):
+        """Mock os.remove that raises an exception."""
         raise OSError("nope")
 
     try:
         monkeypatch.setattr(os, "remove", boom_remove, raising=True)
         # Should not raise; exception is swallowed
-        app_mod.clear_pull_lock()
+        app_test_module.clear_pull_lock()
     finally:
         # Restore and ensure cleanup
         monkeypatch.setattr(os, "remove", real_remove, raising=True)
-        app_mod.clear_pull_lock()
+        app_test_module.clear_pull_lock()
 
     r = client.get("/health")
     assert r.json["pull_running"] is False
 
 
 @pytest.mark.buttons
-def test__run(monkeypatch, app_mod):
+def test__run(monkeypatch, app_test_module):
     """
     _run(cmd, cwd, env) should return (rc, tail_of_stdout_stderr).
     We simulate a child process that prints to stdout and stderr with rc=0.
     """
-    class R:
+
+    # pylint: disable=too-few-public-methods
+    class MockResult:
+        """Mock subprocess result with output."""
         returncode = 0
         stdout = "hello\n" * 10
         stderr = "warn\n" * 10
 
-    def fake_run(cmd, cwd=None, env=None, capture_output=False, text=False, encoding=None, shell=False):
+    def fake_run(**_kwargs):
+        """Mock subprocess.run that validates parameters and returns result."""
         # Validate minimal expectations about how _run calls subprocess.run
-        assert capture_output is True and text is True and shell is False
-        return R()
+        assert _kwargs.get("capture_output") is True
+        assert _kwargs.get("text") is True
+        assert _kwargs.get("shell") is False
+        return MockResult()
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
-    rc, tail = app_mod._run(["python", "-u", "x.py"], cwd=".", env={})
+    rc, tail = app_test_module._run(["python", "-u", "x.py"], cwd=".", env={})
     assert rc == 0
     assert "hello" in tail and "warn" in tail
 
@@ -292,6 +305,7 @@ def test_pull_data_is_pull_runnung(client, tmp_lock, fake_get_rows):  # keeping 
     assert b"pull_running'>true" in page.data
     tmp_lock.clear_running()
 
+
 @pytest.mark.buttons
 def test_pull_data_applicant_data_json_not_found(client, tmp_lock, fake_get_rows, monkeypatch):
     """
@@ -301,15 +315,22 @@ def test_pull_data_applicant_data_json_not_found(client, tmp_lock, fake_get_rows
     tmp_lock.clear_running()
     fake_get_rows.set([("Q", "A")])
 
-    def ok_run(cmd, **kwargs):
-        class R:
+    def ok_run(**_kwargs):
+        """Mock successful subprocess run."""
+
+        # pylint: disable=too-few-public-methods
+        class OkResult:
+            """Mock successful result."""
             returncode = 0
             stdout = "ok"
             stderr = ""
-        return R()
+
+        return OkResult()
 
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists to control which files appear to exist."""
         norm = os.path.normpath(path).replace("\\", "/")
         if norm.endswith("/module_2/scrape.py"):
             return True
@@ -327,8 +348,10 @@ def test_pull_data_applicant_data_json_not_found(client, tmp_lock, fake_get_rows
     assert b"module_2/applicant_data.json not found" in resp.data
     assert b"id='status'" in resp.data
 
+
 @pytest.mark.buttons
-def test_pull_data_llm_standardizer_extended_json_exists(client, tmp_lock, fake_get_rows, monkeypatch):
+def test_pull_data_llm_standardizer_extended_json_exists\
+                (client, tmp_lock, fake_get_rows, monkeypatch):
     """
     If the LLM 'extended' JSON already exists, the app constructs the LLM command
     accordingly (uses the extended file). We don't assert internals of the command—
@@ -337,21 +360,30 @@ def test_pull_data_llm_standardizer_extended_json_exists(client, tmp_lock, fake_
     tmp_lock.clear_running()
     fake_get_rows.set([("Q", "A")])
 
-    def ok_run(cmd, **kwargs):
-        class R:
+    def ok_run(**_kwargs):
+        """Mock successful subprocess run with JSON output."""
+
+        # pylint: disable=too-few-public-methods
+        class JsonResult:
+            """Mock result with JSON output."""
             returncode = 0
-            stdout = "[]"    # valid JSON array (so not the invalid JSON branch)
+            stdout = "[]"  # valid JSON array (so not the invalid JSON branch)
             stderr = ""
-        return R()
+
+        return JsonResult()
 
     real_exists = os.path.exists
 
     def fake_exists(path):
+        """Mock file existence for extended JSON scenario."""
         # Simulate presence of all required scripts and both applicant JSONs
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         # Extended LLM file exists -> app should prefer/handle it
         if "extend" in norm or "llm_extend_applicant_data.json" in norm:
             return True
@@ -376,6 +408,7 @@ def test_pull_data_exception(client, tmp_lock, fake_get_rows, monkeypatch):
     fake_get_rows.set([("Q", "A")])
 
     def boom(*args, **kwargs):
+        """Mock subprocess run that raises an exception."""
         raise RuntimeError("unexpected")
 
     monkeypatch.setattr(subprocess, "run", boom, raising=True)
@@ -448,22 +481,32 @@ def test_pull_data_scrape_fail(client, tmp_lock, fake_get_rows, monkeypatch):
 
     # 1) Make only SCRAPE exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for scrape failure test."""
         norm = os.path.normpath(path).replace("\\", "/")
         if norm.endswith("/module_2/scrape.py"):
             return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) Fail the first subprocess call
     calls = {"n": 0}
-    def fake_run(cmd, **kwargs):
+
+    def fake_run(**_kwargs):
+        """Mock subprocess run with first call failing."""
         calls["n"] += 1
-        class R:
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
             returncode = 1 if calls["n"] == 1 else 0
             stdout = "" if calls["n"] == 1 else "ok"
             stderr = "scrape failed" if calls["n"] == 1 else ""
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
 
     # Follow redirects so ?msg=... shows in the final HTML
@@ -484,24 +527,34 @@ def test_pull_data_clean_fail(client, tmp_lock, fake_get_rows, monkeypatch):
 
     # 1) Make SCRAPE and CLEAN exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for clean failure test."""
         norm = os.path.normpath(path).replace("\\", "/")
         if norm.endswith("/module_2/scrape.py"):
             return True
         if norm.endswith("/module_2/clean.py"):
             return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) SCRAPE ok, CLEAN fail
     calls = {"n": 0}
-    def fake_run(cmd, **kwargs):
+
+    def fake_run(**_kwargs):
+        """Mock subprocess run with clean step failing."""
         calls["n"] += 1
-        class R:
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
             returncode = 0 if calls["n"] == 1 else 1
             stdout = "ok" if calls["n"] == 1 else ""
             stderr = "" if calls["n"] == 1 else "clean failed"
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
 
     resp = client.post("/pull-data", follow_redirects=True)
@@ -521,24 +574,37 @@ def test_pull_data_llm_step_fail(client, tmp_lock, fake_get_rows, monkeypatch):
 
     # 1) SCRAPE, CLEAN, applicant_data.json exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for LLM failure test."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) SCRAPE ok, CLEAN ok, LLM fail
     calls = {"n": 0}
-    def run_fail_llm(cmd, **kwargs):
+
+    def run_fail_llm(**_kwargs):
+        """Mock subprocess run with LLM step failing."""
         calls["n"] += 1
-        class R:
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
             if calls["n"] in (1, 2):
                 returncode, stdout, stderr = 0, "ok", ""
             else:
                 returncode, stdout, stderr = 1, "", "llm failed"
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", run_fail_llm, raising=True)
 
     resp = client.post("/pull-data", follow_redirects=True)
@@ -558,24 +624,37 @@ def test_pull_data_llm_step_invalid_json(client, tmp_lock, fake_get_rows, monkey
 
     # 1) Make SCRAPE, CLEAN, applicant_data.json exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for invalid JSON test."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) SCRAPE ok, CLEAN ok, LLM ok rc but bad stdout
     calls = {"n": 0}
-    def run_invalid_json(cmd, **kwargs):
+
+    def run_invalid_json(**_kwargs):
+        """Mock subprocess run with invalid JSON output."""
         calls["n"] += 1
-        class R:
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
             if calls["n"] in (1, 2):
                 returncode, stdout, stderr = 0, "ok", ""
             else:
                 returncode, stdout, stderr = 0, "NOT_JSON", ""
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", run_invalid_json, raising=True)
 
     resp = client.post("/pull-data", follow_redirects=True)
@@ -595,26 +674,39 @@ def test_pull_data_load_db_fail(client, tmp_lock, fake_get_rows, monkeypatch):
 
     # 1) Make SCRAPE, CLEAN, applicant_data.json exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for load failure test."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) SCRAPE ok, CLEAN ok, LLM ok (valid '[]'), LOAD fails
     calls = {"n": 0}
-    def run_load_fail(cmd, **kwargs):
+
+    def run_load_fail(**_kwargs):
+        """Mock subprocess run with load step failing."""
         calls["n"] += 1
-        class R:
-            if calls["n"] in (1, 2):         # scrape/clean
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
+            if calls["n"] in (1, 2):  # scrape/clean
                 returncode, stdout, stderr = 0, "ok", ""
-            elif calls["n"] == 3:            # llm
+            elif calls["n"] == 3:  # llm
                 returncode, stdout, stderr = 0, "[]", ""
-            else:                             # load
+            else:  # load
                 returncode, stdout, stderr = 1, "", "load failed"
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", run_load_fail, raising=True)
 
     resp = client.post("/pull-data", follow_redirects=True)
@@ -634,27 +726,40 @@ def test_pull_data_success(client, tmp_lock, fake_get_rows, monkeypatch):
 
     # 1) Needed files exist
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for success test."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"): return True
-        if norm.endswith("/module_2/clean.py"): return True
-        if norm.endswith("/module_2/applicant_data.json"): return True
+        if norm.endswith("/module_2/scrape.py"):
+            return True
+        if norm.endswith("/module_2/clean.py"):
+            return True
+        if norm.endswith("/module_2/applicant_data.json"):
+            return True
         # also allow writing extended_json; directory creation uses os.makedirs
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # 2) All steps ok
     calls = {"n": 0}
-    def run_all_ok(cmd, **kwargs):
+
+    def run_all_ok(**_kwargs):
+        """Mock subprocess run with all steps succeeding."""
         calls["n"] += 1
-        class R:
+
+        # pylint: disable=too-few-public-methods
+        class Result:
+            """Mock subprocess result."""
             if calls["n"] in (1, 2):
                 returncode, stdout, stderr = 0, "ok", ""
-            elif calls["n"] == 3:   # LLM
+            elif calls["n"] == 3:  # LLM
                 returncode, stdout, stderr = 0, "[]", ""
-            else:                   # LOAD
+            else:  # LOAD
                 returncode, stdout, stderr = 0, "loaded", ""
-        return R()
+
+        return Result()
+
     monkeypatch.setattr(subprocess, "run", run_all_ok, raising=True)
 
     resp = client.post("/pull-data", follow_redirects=True)
@@ -664,7 +769,8 @@ def test_pull_data_success(client, tmp_lock, fake_get_rows, monkeypatch):
 
 
 @pytest.mark.buttons
-def test_pull_data_exception_covers_clear_lock_and_message(client, tmp_lock, fake_get_rows, monkeypatch):
+def test_pull_data_exception_covers_clear_lock_and_message\
+                (client, tmp_lock, fake_get_rows, monkeypatch):
     """
     Covers the broad except in pull_data:
       except Exception as e:
@@ -681,16 +787,21 @@ def test_pull_data_exception_covers_clear_lock_and_message(client, tmp_lock, fak
 
     # Ensure the code tries to run SCRAPE (enter try-block)
     real_exists = os.path.exists
+
     def fake_exists(path):
+        """Mock os.path.exists for exception test."""
         norm = os.path.normpath(path).replace("\\", "/")
         if norm.endswith("/module_2/scrape.py"):
             return True
         return real_exists(path)
+
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
 
     # First subprocess call raises -> triggers except path
     def boom_run(*_args, **_kwargs):
+        """Mock subprocess run that raises an exception."""
         raise RuntimeError("kaboom")
+
     monkeypatch.setattr(subprocess, "run", boom_run, raising=True)
 
     # Follow redirects so ?msg=... is rendered in the HTML
@@ -700,6 +811,7 @@ def test_pull_data_exception_covers_clear_lock_and_message(client, tmp_lock, fak
     # Lock must be cleared in the except block
     health = client.get("/health")
     assert health.json["pull_running"] is False
+
 
 @pytest.mark.web
 def test_main_guard_runs_without_starting_server(monkeypatch):

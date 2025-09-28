@@ -22,7 +22,7 @@ def test_answers_have_label_and_two_decimal_percentages_single_row(client, fake_
     """
     Minimal case: one analysis row that contains a percentage with two decimals.
     """
-    import re
+
     fake_get_rows.set([("Q: Admit rate?", "Answer: 12.34%")])
 
     resp = client.get("/")
@@ -37,7 +37,7 @@ def test_answers_multiple_rows_each_with_two_decimal_percentages(client, fake_ge
     """
     Multiple rows scenario: ensure every percentage we show follows the two-decimal rule.
     """
-    import re
+
     fake_get_rows.set([
         ("Q1: Admit rate?", "7.00%"),
         ("Q2: Yield rate?", "53.10%"),
