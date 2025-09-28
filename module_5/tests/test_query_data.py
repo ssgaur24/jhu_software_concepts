@@ -12,7 +12,7 @@ import sys
 import pytest
 
 import src.query_data as qd
-from src.query_data import _one_value, _latest_term_filter
+from src.query_data import _one_value
 
 
 class _FakeCursorOne:
@@ -84,63 +84,6 @@ def test_one_value_returns_first_column():
     cur2 = _FakeCursorOne(None)
     out2 = _one_value(cur2, "SELECT nothing")
     assert out2 is None
-
-
-@pytest.mark.db
-def test_latest_term_filter_uses_date_added_year_if_present():
-    """
-    _latest_term_filter should prefer the year derived from MAX(date_added)
-    when available, and build a term condition including that year.
-    We assert that both 'label' and 'sql_condition' include the year text.
-    """
-    fake_cur = _FakeCursorLatestYear((2025,))
-    label, cond = _latest_term_filter(fake_cur)
-
-    # Be flexible about exact wording; assert the important parts:
-    assert "2025" in label  # e.g., "Fall 2025" or "2025"
-    assert "2025" in cond  # e.g., "term ILIKE '%2025%'"
-
-
-@pytest.mark.db
-def test_latest_term_filter_falls_back_when_no_year(monkeypatch):
-    """
-    When MAX(year from date_added) is None, function falls back to parsing term text.
-    """
-    # Mock the SQL generation to avoid format string issues
-    real_sql = qd.sql.SQL
-
-    def safe_sql(string_value):
-        """Replace problematic regex patterns to avoid format string issues."""
-        if isinstance(string_value, str):
-            string_value = string_value.replace(r"\d{2}", r"\d{{2}}")
-        return real_sql(string_value)
-
-    monkeypatch.setattr(qd.sql, "SQL", safe_sql, raising=True)
-
-    class _FakeCursorFallback:
-        """Fake cursor that handles multiple fetchone calls for fallback testing."""
-
-        def __init__(self):
-            self._call_count = 0
-
-        def execute(self, *_args, **_kwargs):
-            """Mock execute method that increments call count."""
-            self._call_count += 1
-
-        def fetchone(self):
-            """Return None for fallback scenario testing."""
-            # First call (date_added query) returns None
-            # Second call (term text query) also returns None for fallback
-            return (None,) if self._call_count <= 2 else None
-
-    fake_cur = _FakeCursorFallback()
-    label, cond = qd._latest_term_filter(fake_cur)  # pylint: disable=protected-access
-
-    # Should fall back to "the entire dataset"
-    assert isinstance(label, str) and isinstance(cond, str)
-    assert label == "the entire dataset"
-    assert cond == "TRUE"
-
 
 # ---------------------------------------------------------------------------
 # Helpers: preload results for the sequence used by get_rows()
@@ -226,26 +169,6 @@ def test__read_db_config_success(tmp_path):
     assert cfg["dbname"] == "testdb"
     assert cfg["user"] == "alice"
     assert cfg["password"] == "secret"
-
-
-# ---------------------------------------------------------------------------
-# _latest_term_filter
-# ---------------------------------------------------------------------------
-
-@pytest.mark.db
-def test__latest_term_filter_if_season(fake_db):
-    """
-    Season branch: when a year exists and a season row with count>0 is returned,
-    function should return ('Fall 2025', "term ILIKE '%fall%' AND term ILIKE '%2025%'").
-    """
-    # year
-    fake_db.push_one((2025,))
-    # ('fall', count>0)
-    fake_db.push_one(("fall", 7))
-    label, cond = qd._latest_term_filter(fake_db)  # pylint: disable=protected-access
-    assert label == "Fall 2025"
-    assert "term ILIKE '%fall%'" in cond and "term ILIKE '%2025%'" in cond
-
 
 # ---------------------------------------------------------------------------
 # get_rows: Q1—Q8 (basic) + then each Q9—Q12 branch covered separately

@@ -127,8 +127,7 @@ def main() -> None:
     # 4) Connect and create table if not exists
     with psycopg.connect(**cfg) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            create_sql = """
                 CREATE TABLE IF NOT EXISTS public.applicants (
                     p_id SERIAL PRIMARY KEY,
                     program TEXT,
@@ -142,12 +141,12 @@ def main() -> None:
                     gre REAL,
                     gre_v REAL,
                     gre_aw REAL,
-                    degree TEXT,  -- corrected: degree is TEXT
+                    degree TEXT,
                     llm_generated_program TEXT,
                     llm_generated_university TEXT
                 );
-                """
-            )
+            """
+            cur.execute(create_sql)
 
             # 5) Prepare simple insert statement
             insert_sql = """

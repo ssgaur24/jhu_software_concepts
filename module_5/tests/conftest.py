@@ -138,10 +138,11 @@ class SimpleCompleted:
         self.stderr = stderr
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def fake_subprocess(monkeypatch):
     """
     Patches subprocess.run with proper argument handling.
+    Uses autouse=True to ensure this is always applied.
     """
 
     def _fake_run(*args, **kwargs):
@@ -170,6 +171,34 @@ def fake_subprocess(monkeypatch):
         return SimpleCompleted(0, "", "")
 
     monkeypatch.setattr(subprocess, "run", _fake_run, raising=True)
+
+
+# =============================================================================
+# Also patch os.path.exists to prevent real file system access
+# =============================================================================
+@pytest.fixture(autouse=True)
+def fake_filesystem(monkeypatch):
+    """
+    Mock file system operations to prevent hanging on real file checks.
+    Uses autouse=True to ensure this is always applied.
+    """
+    real_exists = __import__('os').path.exists
+
+    def fake_exists(path):
+        """Mock os.path.exists that allows most pipeline files to 'exist'."""
+        path_str = str(path).replace("\\", "/")
+
+        # Allow common pipeline files to exist
+        if any(pattern in path_str for pattern in [
+            "scrape.py", "clean.py", "app.py", "load_data.py",
+            "applicant_data.json", "config.ini"
+        ]):
+            return True
+
+        # For everything else, use real filesystem check
+        return real_exists(path)
+
+    monkeypatch.setattr("os.path.exists", fake_exists, raising=True)
 
 
 # =============================================================================

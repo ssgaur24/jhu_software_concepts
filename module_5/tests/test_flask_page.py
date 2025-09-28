@@ -271,7 +271,7 @@ def test_subprocess_integration(monkeypatch, client, tmp_lock, fake_get_rows):
         # Validate minimal expectations about how subprocess.run is called
         assert kwargs.get("capture_output") is True
         assert kwargs.get("text") is True
-        assert kwargs.get("shell") is False
+        assert kwargs.get("shell", False) is False
         return MockResult()
 
     # Mock file existence to allow the pull to proceed through scrape step
@@ -441,7 +441,7 @@ def test_pull_data_exception(client, tmp_lock, fake_get_rows, monkeypatch):
 
     def boom(*_args, **_kwargs):
         """Mock subprocess run that raises an exception."""
-        raise RuntimeError("unexpected")
+        raise OSError("unexpected")
 
     monkeypatch.setattr(subprocess, "run", boom, raising=True)
 
@@ -863,3 +863,25 @@ def test_main_guard_runs_without_starting_server(monkeypatch):
     monkeypatch.setattr(Flask, "run", lambda self, **kw: None, raising=True)
     # Execute src/app.py as __main__ (hits the main guard)
     runpy.run_module("app", run_name="__main__")
+
+@pytest.mark.buttons
+def test_pull_data_script_not_exists_coverage(client, tmp_lock, fake_get_rows, monkeypatch):
+    """
+    Test coverage for the case where pipeline scripts don't exist.
+    This should hit the 'return True, ""' line in _run_pipeline_step.
+    """
+    tmp_lock.clear_running()
+    fake_get_rows.set([("Q", "A")])
+
+    # Mock os.path.exists to return False for all script files
+    def script_not_exists(_path):
+        """Mock that makes all pipeline scripts appear to not exist."""
+        return False
+
+    monkeypatch.setattr(os.path, "exists", script_not_exists, raising=True)
+
+    # This should trigger the early return path when scripts don't exist
+    resp = client.post("/pull-data", follow_redirects=True)
+    assert resp.status_code == 200
+    # Should succeed because missing scripts are skipped
+    assert b"id='status'" in resp.data

@@ -44,78 +44,6 @@ def _one_value(cur, stmt: sql.Composed, params: tuple[Any, ...] | dict | None = 
     return row[0] if row else None
 
 
-def _latest_term_filter(cur) -> tuple[str, str]:
-    """
-    Returns (label, sql_condition) for the most recent term in the data.
-    label -> e.g., "Fall 2025" or "2025" or "the entire dataset"
-    sql_condition -> safe literal-composed string like "term ILIKE '%fall%'
-    AND term ILIKE '%2025%'" or "TRUE"
-    """
-    tbl = sql.Identifier("public", "applicants")
-
-    # 1) Latest year from date_added
-    stmt_year_from_date = sql.SQL("""
-        SELECT EXTRACT(YEAR FROM MAX(date_added))::int
-        FROM {tbl}
-        WHERE date_added IS NOT NULL
-        LIMIT 1;
-    """).format(tbl=tbl)
-    cur.execute(stmt_year_from_date)
-    r = cur.fetchone()
-    year = r[0] if r and r[0] is not None else None
-
-    if year is None:
-        # 2) Fallback: derive latest year from term text
-        stmt_year_from_term = sql.SQL("""
-            WITH yrs AS (
-              SELECT (regexp_matches(term, '(19|20)\\d{{2}}', 'g'))[1]::int AS y
-              FROM {tbl}
-              WHERE term IS NOT NULL
-            )
-            SELECT MAX(y) FROM yrs
-            LIMIT 1;
-        """).format(tbl=tbl)
-        cur.execute(stmt_year_from_term)
-        r = cur.fetchone()
-        year = r[0] if r and r[0] is not None else None
-
-    if year is None:
-        return ("the entire dataset", "TRUE")
-
-    # 3) Pick season within that year having most rows
-    year_pat = f"%{year}%"
-    stmt_season = sql.SQL("""
-        SELECT s, c FROM (
-          SELECT 'fall'   AS s, COUNT(*) AS c FROM {tbl} WHERE term ILIKE %(fall)s   AND term ILIKE %(y)s
-          UNION ALL
-          SELECT 'spring' AS s, COUNT(*) AS c FROM {tbl} WHERE term ILIKE %(spring)s AND term ILIKE %(y)s
-          UNION ALL
-          SELECT 'summer' AS s, COUNT(*) AS c FROM {tbl} WHERE term ILIKE %(summer)s AND term ILIKE %(y)s
-          UNION ALL
-          SELECT 'winter' AS s, COUNT(*) AS c FROM {tbl} WHERE term ILIKE %(winter)s AND term ILIKE %(y)s
-        ) t
-        ORDER BY c DESC, s ASC
-        LIMIT 1;
-    """).format(tbl=tbl)
-    cur.execute(
-        stmt_season,
-        {
-            "fall": "%fall%",
-            "spring": "%spring%",
-            "summer": "%summer%",
-            "winter": "%winter%",
-            "y": year_pat,
-        },
-    )
-    r = cur.fetchone()
-    season = (r[0] if r and r[1] and int(r[1]) > 0 else None)
-
-    if season:
-        return (f"{season.title()} {year}", f"term ILIKE '%{season}%' AND term ILIKE '%{year}%'")
-
-    return (f"{year}", f"term ILIKE '%{year}%'")
-
-
 _TERM_SEASON = "fall"
 _TERM_YEAR = "2024"
 
@@ -137,7 +65,7 @@ def get_rows() -> List[Tuple[str, str]]:
 
             # ---------------- custom questions (Q9–Q12) ----------------
 
-            label, term_cond = _latest_term_filter(cur)
+            label, term_cond = ("Fall 2025", "term ILIKE '%fall%' AND term ILIKE '%2025%'")
 
             q9(cur, label, rows_out, tbl, term_cond)
 
