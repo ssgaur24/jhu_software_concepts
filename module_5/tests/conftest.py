@@ -19,11 +19,10 @@ from pathlib import Path
 import types
 import pytest
 
-
 # =============================================================================
 # 1) Make "from app import app" etc. import from module_4/src
 # =============================================================================
-ROOT = Path(__file__).resolve().parents[1]   # -> module_4/
+ROOT = Path(__file__).resolve().parents[1]  # -> module_4/
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -40,10 +39,11 @@ class FakeCursor:
       - records SQL you "execute"
       - returns values you preloaded into queues for fetchone()/fetchall()
     """
+
     def __init__(self):
-        self.executed = []          # list of (sql, params) the code ran
-        self._one_queue = []        # values to return for fetchone()
-        self._all_queue = []        # lists of rows to return for fetchall()
+        self.executed = []  # list of (sql, params) the code ran
+        self._one_queue = []  # values to return for fetchone()
+        self._all_queue = []  # lists of rows to return for fetchall()
 
     def execute(self, sql, params=None):
         """Record SQL execution."""
@@ -79,6 +79,7 @@ class FakeCursor:
 
 class FakeConnection:
     """Very small connection that always returns the same FakeCursor."""
+
     def __init__(self, cursor: FakeCursor):
         self._cursor = cursor
 
@@ -116,8 +117,8 @@ def fake_db(monkeypatch):
         return FakeConnection(cur)
 
     # Import psycopg and patch its connect function
-    psycopg = importlib.import_module("psycopg")
-    monkeypatch.setattr(psycopg, "connect", _fake_connect, raising=True)
+    psycopg_module = importlib.import_module("psycopg")
+    monkeypatch.setattr(psycopg_module, "connect", _fake_connect, raising=True)
 
     return cur  # return the cursor so tests can preload results
 
@@ -130,6 +131,7 @@ def fake_db(monkeypatch):
 # pylint: disable=too-few-public-methods
 class SimpleCompleted:
     """Tiny stand-in for subprocess.CompletedProcess (only fields we use)."""
+
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
         self.stdout = stdout
@@ -183,7 +185,7 @@ def app_test_module(monkeypatch, tmp_path):
       - LOCK_PATH -> tmp file (safe place for "pull running" flag)
     Returns the imported module so tests can access app_test_module.app (Flask app).
     """
-    app_module = importlib.import_module("app")
+    app_module_obj = importlib.import_module("app")
 
     # Build very small HTML for predictable tests
     def _fake_render_template(*_args, **kwargs):
@@ -228,26 +230,30 @@ def app_test_module(monkeypatch, tmp_path):
         return "\n".join(lines)
 
     # Patch the function the app calls to render HTML
-    monkeypatch.setattr(app_module, "render_template", _fake_render_template, raising=True)
+    monkeypatch.setattr(app_module_obj, "render_template", _fake_render_template, raising=True)
 
     # Point the lock path into a temporary folder
     lock_path = tmp_path / "pull.lock"
-    monkeypatch.setattr(app_module, "LOCK_PATH", str(lock_path), raising=True)
+    monkeypatch.setattr(app_module_obj, "LOCK_PATH", str(lock_path), raising=True)
 
-    return app_module
+    return app_module_obj
 
 
 # =============================================================================
 # 5) Flask test client ready to go (DB + subprocess already faked by fixtures)
 # =============================================================================
 @pytest.fixture
-def client(app_test_module):
+def client(request):
     """
     Creates a Flask test client with TESTING mode on.
-    Because app_test_module is listed as dependency here,
-    the patches are applied automatically before you get the client.
+    Ensures app_test_module patches are applied by accessing it through pytest's fixture system.
     """
-    flask_app = app_test_module.app
+    # Get the app_test_module fixture to ensure patches are applied
+    app_test_module_fixture = request.getfixturevalue('app_test_module')
+    print(app_test_module_fixture)
+    # Now manually import to get the patched module
+    app_module_obj = importlib.import_module("app")
+    flask_app = app_module_obj.app
     flask_app.config["TESTING"] = True
     return flask_app.test_client()
 
@@ -256,14 +262,20 @@ def client(app_test_module):
 # 6) Simple helpers to set/clear the "pull is running" lock file
 # =============================================================================
 @pytest.fixture
-def tmp_lock(app_test_module):
+def tmp_lock(request):
     """
     Gives you two helper functions:
       tmp_lock.set_running() -> create the lock file
       tmp_lock.clear_running() -> remove the lock file
-    Use this to simulate that a Pull is in progress.
+    Ensures app_test_module patches are applied by accessing it through pytest's fixture system.
     """
-    lock_file = Path(app_test_module.LOCK_PATH)
+    # Get the app_test_module fixture to ensure patches are applied
+    app_test_module_fixture = request.getfixturevalue('app_test_module')
+    print(app_test_module_fixture)
+
+    # Now manually import to get the patched module
+    app_module_obj = importlib.import_module("app")
+    lock_file = Path(app_module_obj.LOCK_PATH)
 
     def set_running():
         """Create lock file to simulate pull in progress."""
@@ -288,12 +300,12 @@ def fake_get_rows(monkeypatch):
     sees our fake rows even though app.py imported the symbol at import time.
     """
     qmod = importlib.import_module("query_data")
-    app_module = importlib.import_module("app")  # app.py did: from query_data import get_rows
+    app_module_import = importlib.import_module("app")
 
     def set_rows(rows):
         """Set fake rows to be returned by get_rows()."""
         monkeypatch.setattr(qmod, "get_rows", lambda: rows, raising=True)
-        monkeypatch.setattr(app_module, "get_rows", lambda: rows, raising=True)
+        monkeypatch.setattr(app_module_import, "get_rows", lambda: rows, raising=True)
 
     return types.SimpleNamespace(set=set_rows)
 
@@ -305,24 +317,24 @@ def enhanced_fake_db(monkeypatch):
     """
     cur = FakeCursor()
 
-    def _fake_connect(*args, **kwargs):
+    def _fake_connect(*_args, **_kwargs):
         return FakeConnection(cur)
 
     # Import and patch psycopg in multiple locations
-    import psycopg
-    monkeypatch.setattr(psycopg, "connect", _fake_connect, raising=True)
+    psycopg_module = importlib.import_module("psycopg")
+    monkeypatch.setattr(psycopg_module, "connect", _fake_connect, raising=True)
 
     # Patch in src.load_data
     try:
-        import src.load_data as ld
-        monkeypatch.setattr(ld.psycopg, "connect", _fake_connect, raising=True)
+        load_data_module = importlib.import_module("src.load_data")
+        monkeypatch.setattr(load_data_module.psycopg, "connect", _fake_connect, raising=True)
     except (ImportError, AttributeError):
         pass
 
     # Patch in src.query_data
     try:
-        import src.query_data as qd
-        monkeypatch.setattr(qd.psycopg, "connect", _fake_connect, raising=True)
+        query_data_module = importlib.import_module("src.query_data")
+        monkeypatch.setattr(query_data_module.psycopg, "connect", _fake_connect, raising=True)
     except (ImportError, AttributeError):
         pass
 
