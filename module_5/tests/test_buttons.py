@@ -31,14 +31,15 @@ def test_post_pull_data_returns_200_and_triggers_loader(
     real_exists = os.path.exists
 
     def fake_exists(path):
-        """Mock os.path.exists for pipeline files."""
         norm = os.path.normpath(path).replace("\\", "/")
-        if norm.endswith("/module_2/scrape.py"):
-            return True
-        if norm.endswith("/module_2/clean.py"):
-            return True
-        if norm.endswith("/module_2/applicant_data.json"):
-            return True
+        # module_2 steps
+        if norm.endswith("/scrape.py"): return True
+        if norm.endswith("/clean.py"): return True
+        if norm.endswith("/applicant_data.json"): return True
+        if norm.endswith("/llm_hosting/app.py"): return True  # <— add this
+
+        # loaders (script paths) — helpful if app checks before calling
+        if norm.endswith("/load_data.py"): return True
         return real_exists(path)
 
     monkeypatch.setattr(os.path, "exists", fake_exists, raising=True)
