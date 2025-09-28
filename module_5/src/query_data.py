@@ -111,16 +111,9 @@ def _latest_term_filter(cur) -> tuple[str, str]:
     season = (r[0] if r and r[1] and int(r[1]) > 0 else None)
 
     if season:
-        label = f"{season.title()} {year}"
-        cond = sql.SQL("term ILIKE {s} AND term ILIKE {y}").format(
-            s=sql.Literal(f"%{season}%"),
-            y=sql.Literal(year_pat),
-        ).as_string(cur.connection)
-        return (label, cond)
-    else:
-        label = f"{year}"
-        cond = sql.SQL("term ILIKE {y}").format(y=sql.Literal(year_pat)).as_string(cur.connection)
-        return (label, cond)
+        return (f"{season.title()} {year}", f"term ILIKE '%{season}%' AND term ILIKE '%{year}%'")
+
+    return (f"{year}", f"term ILIKE '%{year}%'")
 
 
 _TERM_SEASON = "fall"
