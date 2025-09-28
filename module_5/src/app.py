@@ -198,7 +198,7 @@ def pull_data():
     start_pull_lock()
     try:
         here = os.path.dirname(__file__)
-        repo = os.path.abspath(os.path.join(here, ".."))
+        repo = os.path.abspath(os.path.join(here, "../.."))
         mod2_dir = os.path.join(repo, "module_2")
         llm_dir = os.path.join(mod2_dir, "llm_hosting")
         env = _build_environment(repo)
