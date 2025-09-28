@@ -1,5 +1,7 @@
 # Module 4 - Grad Café Analytics Test Suite
 
+Refer to branch module4_submission for the code subimitted as part of assignment.
+This branch has feedback incorporated for the module 2 and likewise recreated module 3 and 4.
 A comprehensive test suite for the Grad Café analytics application built in Module 3, featuring Flask testing, database integration, and automated CI/CD.
 
 ## Features
